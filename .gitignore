@@ -13,11 +13,11 @@ install/
 **/.pytest_cache/
 
 # 模型权重（使用 Git LFS 管理）
-src/excavator_perception/models/best.pt
-src/excavator_perception/models/*.pt
-src/excavator_perception/models/*.pth
-src/excavator_perception/models/*.onnx
-src/excavator_perception/models/*.engine
+
+
+h
+
+
 
 # 大型日志/rosbag
 results/raw_bags/*.bag
