@@ -1,8 +1,0 @@
-prefix=/home/excavator/excavator_ws/install
-
-Name: excavator_decision
-Description: Description of excavator_decision
-Version: 0.0.0
-Cflags: 
-Libs: -L${prefix}/lib 
-Requires: 
