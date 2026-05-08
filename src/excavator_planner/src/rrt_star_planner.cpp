@@ -356,7 +356,7 @@ void RRTStarPlannerNode::followingTimerCb(const ros::TimerEvent&) {
     if (d_goal < params_.goal_radius) {
         ROS_INFO("RRTStar: goal reached! (dist=%.3f)", d_goal);
         current_path_.clear();
-        cmd_vel_pub_.publish(geometry_msgs::Twist());
+        // 到达目标后停止发布 cmd_vel，交还控制权给 FSM
     }
 }
 

@@ -48,12 +48,14 @@ class YoloV5DetectorNode:
         self.stride = self.model.stride
         self.img_size = check_img_size(img_size, s=self.stride)
 
-        # 半精度（GPU 模式）
+        # 半精度（GPU 模式）— 同步 fp16 标志避免 warmup dtype 不匹配
         self.half = self.device.type != "cpu"
         if self.half:
             self.model.model.half()
+            self.model.fp16 = True   # 让 warmup() 用 float16 输入
         else:
             self.model.model.float()
+            self.model.fp16 = False
 
         # 模型预热
         self.model.warmup(imgsz=(1, 3, self.img_size, self.img_size))
@@ -95,7 +97,7 @@ class YoloV5DetectorNode:
         pred = self.model(tensor, augment=False, visualize=False)
         pred = non_max_suppression(
             pred, self.conf_thres, self.iou_thres,
-            classes=None, agnostic_nms=False, max_det=50)
+            classes=None, agnostic=False, max_det=50)
 
         # 构造消息
         array_msg = ObstacleArray()
