@@ -1,0 +1,11 @@
+# YOLOv5 检测节点参数配置
+# 路径使用 ROS find 宏展开，在 launch 文件中加载
+weights_path: ""          # 由 launch 文件覆盖为 $(find excavator_perception)/models/best.pt
+conf_thres: 0.5           # 置信度阈值（0~1）
+iou_thres: 0.45           # NMS IoU 阈值
+device: "0"               # GPU 编号；-1 表示强制 CPU 推理
+img_size: 640             # 推理分辨率（像素，正方形）
+class_names:
+  - "person"
+  - "vehicle"
+  - "obstacle"

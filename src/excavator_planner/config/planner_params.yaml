@@ -1,0 +1,24 @@
+# RRT* Planner Parameters
+# Reference: Phase 4 task spec defaults
+
+step_size: 0.5          # RRT extension step length (m)
+max_iterations: 5000    # maximum iteration count
+goal_radius: 0.3        # goal arrival radius (m)
+rewire_radius: 2.0      # rewire search radius (m)
+obstacle_margin: 0.5    # obstacle safety inflation (m)
+planning_timeout: 5.0   # planning timeout (s)
+
+# Path follower
+nominal_speed: 1.0      # following speed (m/s)
+lookahead_dist: 2.0     # pure-pursuit look-ahead distance (m)
+
+# Planning cycle
+planning_period: 2.0    # re-plan interval (s)
+following_period: 0.1   # velocity command publish interval (s)
+
+# Default goal (used when no goal is set externally)
+goal_x: 10.0            # (m)
+goal_y: 0.0             # (m)
+
+# Frame
+fixed_frame: "odom"

@@ -1,0 +1,309 @@
+<?xml version="1.0"?>
+<robot name="excavator" xmlns:xacro="http://www.ros.org/wiki/xacro">
+
+  <!-- ===== 全局尺寸参数 ===== -->
+  <xacro:property name="PI" value="3.14159265358979"/>
+
+  <!-- 底盘 -->
+  <xacro:property name="chassis_mass" value="8000.0"/>
+  <xacro:property name="chassis_len"  value="4.0"/>
+  <xacro:property name="chassis_wid"  value="2.0"/>
+  <xacro:property name="chassis_hgt"  value="1.2"/>
+
+  <!-- 履带 -->
+  <xacro:property name="track_mass"      value="500.0"/>
+  <xacro:property name="track_len"       value="3.8"/>
+  <xacro:property name="track_wid"       value="0.4"/>
+  <xacro:property name="track_hgt"       value="0.3"/>
+  <xacro:property name="track_offset_y"  value="1.1"/>
+
+  <!-- 动臂 boom -->
+  <xacro:property name="boom_mass"    value="800.0"/>
+  <xacro:property name="boom_len"     value="4.0"/>
+  <xacro:property name="boom_thick"   value="0.35"/>
+
+  <!-- 斗杆 arm -->
+  <xacro:property name="arm_mass"     value="400.0"/>
+  <xacro:property name="arm_len"      value="2.5"/>
+  <xacro:property name="arm_thick"    value="0.25"/>
+
+  <!-- 铲斗 bucket -->
+  <xacro:property name="bucket_mass"  value="300.0"/>
+  <xacro:property name="bucket_len"   value="1.0"/>
+  <xacro:property name="bucket_wid"   value="0.8"/>
+  <xacro:property name="bucket_thick" value="0.3"/>
+
+  <!-- ===== 惯量宏 ===== -->
+  <xacro:macro name="box_inertia" params="m x y z">
+    <inertial>
+      <mass value="${m}"/>
+      <inertia
+        ixx="${m*(y*y+z*z)/12.0}" ixy="0" ixz="0"
+        iyy="${m*(x*x+z*z)/12.0}" iyz="0"
+        izz="${m*(x*x+y*y)/12.0}"/>
+    </inertial>
+  </xacro:macro>
+
+  <xacro:macro name="cylinder_inertia" params="m r h">
+    <inertial>
+      <mass value="${m}"/>
+      <inertia
+        ixx="${m*(3*r*r+h*h)/12.0}" ixy="0" ixz="0"
+        iyy="${m*(3*r*r+h*h)/12.0}" iyz="0"
+        izz="${m*r*r/2.0}"/>
+    </inertial>
+  </xacro:macro>
+
+  <!-- ===== 履带宏（左/右复用） ===== -->
+  <xacro:macro name="track_link" params="prefix reflect">
+    <link name="${prefix}_track_link">
+      <visual>
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+        <geometry>
+          <box size="${track_len} ${track_wid} ${track_hgt}"/>
+        </geometry>
+        <material name="dark_gray">
+          <color rgba="0.2 0.2 0.2 1.0"/>
+        </material>
+      </visual>
+      <collision>
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+        <geometry>
+          <box size="${track_len} ${track_wid} ${track_hgt}"/>
+        </geometry>
+      </collision>
+      <xacro:box_inertia m="${track_mass}" x="${track_len}" y="${track_wid}" z="${track_hgt}"/>
+    </link>
+
+    <joint name="${prefix}_track_joint" type="continuous">
+      <parent link="base_link"/>
+      <child  link="${prefix}_track_link"/>
+      <origin xyz="0 ${reflect * track_offset_y} ${-chassis_hgt/2 + track_hgt/2}" rpy="0 0 0"/>
+      <axis xyz="0 1 0"/>
+      <dynamics damping="0.1" friction="1.0"/>
+    </joint>
+
+    <gazebo reference="${prefix}_track_link">
+      <material>Gazebo/DarkGray</material>
+      <mu1>1.5</mu1>
+      <mu2>1.5</mu2>
+    </gazebo>
+  </xacro:macro>
+
+  <!-- ===== 世界坐标基准 ===== -->
+  <link name="base_footprint"/>
+
+  <joint name="base_footprint_joint" type="fixed">
+    <parent link="base_footprint"/>
+    <child  link="base_link"/>
+    <origin xyz="0 0 0.75" rpy="0 0 0"/>
+  </joint>
+
+  <!-- ===== 底盘 ===== -->
+  <link name="base_link">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <box size="${chassis_len} ${chassis_wid} ${chassis_hgt}"/>
+      </geometry>
+      <material name="excavator_yellow">
+        <color rgba="0.95 0.75 0.05 1.0"/>
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <box size="${chassis_len} ${chassis_wid} ${chassis_hgt}"/>
+      </geometry>
+    </collision>
+    <xacro:box_inertia m="${chassis_mass}" x="${chassis_len}" y="${chassis_wid}" z="${chassis_hgt}"/>
+  </link>
+
+  <gazebo reference="base_link">
+    <material>Gazebo/Yellow</material>
+  </gazebo>
+
+  <!-- ===== 左右履带 ===== -->
+  <xacro:track_link prefix="left"  reflect="1"/>
+  <xacro:track_link prefix="right" reflect="-1"/>
+
+  <!-- ===== 上部回转体 ===== -->
+  <link name="turret_link">
+    <visual>
+      <origin xyz="-0.3 0 0" rpy="0 0 0"/>
+      <geometry>
+        <box size="2.8 1.8 0.8"/>
+      </geometry>
+      <material name="excavator_yellow">
+        <color rgba="0.95 0.75 0.05 1.0"/>
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="-0.3 0 0" rpy="0 0 0"/>
+      <geometry>
+        <box size="2.8 1.8 0.8"/>
+      </geometry>
+    </collision>
+    <inertial>
+      <mass value="2000.0"/>
+      <inertia ixx="600" ixy="0" ixz="0" iyy="1200" iyz="0" izz="1400"/>
+    </inertial>
+  </link>
+
+  <joint name="turret_joint" type="revolute">
+    <parent link="base_link"/>
+    <child  link="turret_link"/>
+    <origin xyz="0 0 ${chassis_hgt/2 + 0.4}" rpy="0 0 0"/>
+    <axis xyz="0 0 1"/>
+    <limit lower="-3.14159" upper="3.14159" effort="50000" velocity="0.5"/>
+    <dynamics damping="100.0" friction="50.0"/>
+  </joint>
+
+  <gazebo reference="turret_link">
+    <material>Gazebo/Yellow</material>
+  </gazebo>
+
+  <!-- ===== 动臂 boom ===== -->
+  <link name="boom_link">
+    <visual>
+      <origin xyz="${boom_len/2} 0 0" rpy="0 0 0"/>
+      <geometry>
+        <box size="${boom_len} ${boom_thick} ${boom_thick}"/>
+      </geometry>
+      <material name="excavator_yellow">
+        <color rgba="0.95 0.75 0.05 1.0"/>
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="${boom_len/2} 0 0" rpy="0 0 0"/>
+      <geometry>
+        <box size="${boom_len} ${boom_thick} ${boom_thick}"/>
+      </geometry>
+    </collision>
+    <xacro:box_inertia m="${boom_mass}" x="${boom_len}" y="${boom_thick}" z="${boom_thick}"/>
+  </link>
+
+  <joint name="boom_joint" type="revolute">
+    <parent link="turret_link"/>
+    <child  link="boom_link"/>
+    <origin xyz="1.0 0 0.3" rpy="0 0 0"/>
+    <axis xyz="0 1 0"/>
+    <limit lower="-0.35" upper="1.22" effort="80000" velocity="0.3"/>
+    <dynamics damping="200.0" friction="100.0"/>
+  </joint>
+
+  <gazebo reference="boom_link">
+    <material>Gazebo/Yellow</material>
+  </gazebo>
+
+  <!-- ===== 斗杆 arm ===== -->
+  <link name="arm_link">
+    <visual>
+      <origin xyz="${arm_len/2} 0 0" rpy="0 0 0"/>
+      <geometry>
+        <box size="${arm_len} ${arm_thick} ${arm_thick}"/>
+      </geometry>
+      <material name="excavator_yellow">
+        <color rgba="0.95 0.75 0.05 1.0"/>
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="${arm_len/2} 0 0" rpy="0 0 0"/>
+      <geometry>
+        <box size="${arm_len} ${arm_thick} ${arm_thick}"/>
+      </geometry>
+    </collision>
+    <xacro:box_inertia m="${arm_mass}" x="${arm_len}" y="${arm_thick}" z="${arm_thick}"/>
+  </link>
+
+  <joint name="arm_joint" type="revolute">
+    <parent link="boom_link"/>
+    <child  link="arm_link"/>
+    <origin xyz="${boom_len} 0 0" rpy="0 0 0"/>
+    <axis xyz="0 1 0"/>
+    <limit lower="-2.09" upper="0.35" effort="60000" velocity="0.4"/>
+    <dynamics damping="150.0" friction="80.0"/>
+  </joint>
+
+  <gazebo reference="arm_link">
+    <material>Gazebo/Yellow</material>
+  </gazebo>
+
+  <!-- ===== 铲斗 bucket ===== -->
+  <link name="bucket_link">
+    <visual>
+      <origin xyz="${bucket_len/2} 0 ${-bucket_thick/2}" rpy="0 0 0"/>
+      <geometry>
+        <box size="${bucket_len} ${bucket_wid} ${bucket_thick}"/>
+      </geometry>
+      <material name="steel_gray">
+        <color rgba="0.4 0.4 0.4 1.0"/>
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="${bucket_len/2} 0 ${-bucket_thick/2}" rpy="0 0 0"/>
+      <geometry>
+        <box size="${bucket_len} ${bucket_wid} ${bucket_thick}"/>
+      </geometry>
+    </collision>
+    <xacro:box_inertia m="${bucket_mass}" x="${bucket_len}" y="${bucket_wid}" z="${bucket_thick}"/>
+  </link>
+
+  <joint name="bucket_joint" type="revolute">
+    <parent link="arm_link"/>
+    <child  link="bucket_link"/>
+    <origin xyz="${arm_len} 0 0" rpy="0 0 0"/>
+    <axis xyz="0 1 0"/>
+    <limit lower="-2.44" upper="0.70" effort="40000" velocity="0.5"/>
+    <dynamics damping="80.0" friction="40.0"/>
+  </joint>
+
+  <gazebo reference="bucket_link">
+    <material>Gazebo/Grey</material>
+  </gazebo>
+
+  <!-- ===== 传感器支架 ===== -->
+  <link name="sensor_mast_link">
+    <visual>
+      <geometry><cylinder radius="0.04" length="0.5"/></geometry>
+      <material name="black"><color rgba="0.1 0.1 0.1 1"/></material>
+    </visual>
+    <collision>
+      <geometry><cylinder radius="0.04" length="0.5"/></geometry>
+    </collision>
+    <xacro:cylinder_inertia m="2.0" r="0.04" h="0.5"/>
+  </link>
+
+  <joint name="sensor_mast_joint" type="fixed">
+    <parent link="turret_link"/>
+    <child  link="sensor_mast_link"/>
+    <origin xyz="-0.8 0 0.9" rpy="0 0 0"/>
+  </joint>
+
+  <!-- ===== 传感器（摄像头 + 激光雷达）===== -->
+  <!-- 传感器连杆、关节和 Gazebo 插件定义在 sensors.xacro 中 -->
+  <xacro:include filename="$(find excavator_description)/urdf/sensors.xacro"/>
+
+  <!-- ===== Gazebo 插件：差速驱动 ===== -->
+  <gazebo>
+    <plugin name="differential_drive_controller" filename="libgazebo_ros_diff_drive.so">
+      <leftJoint>left_track_joint</leftJoint>
+      <rightJoint>right_track_joint</rightJoint>
+      <wheelSeparation>${2 * track_offset_y}</wheelSeparation>
+      <wheelDiameter>${track_hgt}</wheelDiameter>
+      <wheelTorque>20000</wheelTorque>
+      <wheelAcceleration>1.0</wheelAcceleration>
+      <commandTopic>cmd_vel</commandTopic>
+      <odometryTopic>odom</odometryTopic>
+      <odometryFrame>odom</odometryFrame>
+      <robotBaseFrame>base_footprint</robotBaseFrame>
+      <odometrySource>1</odometrySource>
+      <publishWheelTF>false</publishWheelTF>
+      <publishOdomTF>true</publishOdomTF>
+      <publishWheelJointState>true</publishWheelJointState>
+      <legacyMode>false</legacyMode>
+    </plugin>
+  </gazebo>
+
+
+</robot>

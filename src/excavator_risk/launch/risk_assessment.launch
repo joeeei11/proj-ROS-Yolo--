@@ -1,0 +1,14 @@
+<launch>
+  <!-- 轨迹预测节点：卡尔曼滤波 + TTC 计算 -->
+  <node name="trajectory_predictor" pkg="excavator_risk"
+        type="trajectory_predictor.py" output="screen">
+    <rosparam file="$(find excavator_risk)/config/risk_thresholds.yaml" command="load"/>
+  </node>
+
+  <!-- 风险评估节点：多因子加权评分 + 三级分类 -->
+  <node name="risk_assessor" pkg="excavator_risk"
+        type="risk_assessor.py" output="screen">
+    <rosparam file="$(find excavator_risk)/config/risk_thresholds.yaml" command="load"/>
+    <param name="input_topic" value="/excavator/predicted_obstacles"/>
+  </node>
+</launch>

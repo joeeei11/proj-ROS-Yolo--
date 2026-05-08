@@ -1,0 +1,11 @@
+run_id,timestamp,scenario,event_type,response_time_ms,perception_latency_ms_p95,risk_level,obstacle_type,min_distance_m,success
+1,20260508_195037,test_vehicle,EMERGENCY_STOP,100.4,,HIGH,vehicle,1.5,True
+2,20260508_195038,test_vehicle,EMERGENCY_STOP,100.4,,HIGH,vehicle,1.5,True
+3,20260508_195039,test_vehicle,EMERGENCY_STOP,100.3,,HIGH,vehicle,1.5,True
+4,20260508_195039,test_vehicle,EMERGENCY_STOP,100.4,,HIGH,vehicle,1.5,True
+5,20260508_195040,test_vehicle,EMERGENCY_STOP,100.5,,HIGH,vehicle,1.5,True
+6,20260508_195041,test_vehicle,EMERGENCY_STOP,200.5,,HIGH,vehicle,1.5,True
+7,20260508_195042,test_vehicle,EMERGENCY_STOP,100.4,,HIGH,vehicle,1.5,True
+8,20260508_195043,test_vehicle,EMERGENCY_STOP,100.4,,HIGH,vehicle,1.5,True
+9,20260508_195043,test_vehicle,EMERGENCY_STOP,100.4,,HIGH,vehicle,1.5,True
+10,20260508_195044,test_vehicle,EMERGENCY_STOP,100.4,,HIGH,vehicle,1.5,True

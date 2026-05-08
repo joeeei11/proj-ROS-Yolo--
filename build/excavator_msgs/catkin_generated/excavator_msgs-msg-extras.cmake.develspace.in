@@ -1,0 +1,2 @@
+set(excavator_msgs_MESSAGE_FILES "/home/excavator/excavator_ws/src/excavator_msgs/msg/ObstacleInfo.msg;/home/excavator/excavator_ws/src/excavator_msgs/msg/ObstacleArray.msg;/home/excavator/excavator_ws/src/excavator_msgs/msg/RiskState.msg;/home/excavator/excavator_ws/src/excavator_msgs/msg/SystemState.msg")
+set(excavator_msgs_SERVICE_FILES "/home/excavator/excavator_ws/src/excavator_msgs/srv/SetMode.srv;/home/excavator/excavator_ws/src/excavator_msgs/srv/SpawnObstacle.srv")

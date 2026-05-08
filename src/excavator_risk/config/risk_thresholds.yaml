@@ -1,0 +1,31 @@
+# risk_thresholds.yaml — 风险评估模块全局配置
+# 所有数值可在不重新编译的情况下修改
+
+# ── 评分权重 ──────────────────────────────────────
+w_distance: 0.6          # 距离因子权重（0~1，与 w_ttc 之和建议为 1）
+w_ttc: 0.4               # TTC 因子权重
+
+# ── 障碍物类型权重乘数 ────────────────────────────
+type_weights:
+  person: 1.5            # 行人威胁最高
+  vehicle: 1.2           # 车辆次之
+  obstacle: 1.0          # 静态障碍物基准
+
+# ── 风险等级阈值 ──────────────────────────────────
+risk_low_threshold: 0.3  # 低于此值为 LOW
+risk_high_threshold: 0.7 # 高于此值为 HIGH（中间为 MEDIUM）
+
+# ── 距离评分分段函数参数（单位：m）────────────────
+safe_distance: 5.0       # 距离 >= safe_distance → 距离分 = 0（安全）
+critical_distance: 1.0   # 距离 <= critical_distance → 距离分 = 1（极危）
+
+# ── TTC 评分分段函数参数（单位：s）───────────────
+safe_ttc: 5.0            # TTC >= safe_ttc → TTC 分 = 0（安全）
+critical_ttc: 1.5        # TTC <= critical_ttc → TTC 分 = 1（极危）
+
+# ── 轨迹预测参数 ──────────────────────────────────
+dt: 0.1                  # 卡尔曼滤波时间步长（s），与感知帧率匹配（10Hz）
+proc_noise: 0.1          # 过程噪声系数（运动模型不确定性）
+meas_noise: 0.5          # 观测噪声系数（传感器测量不确定性）
+max_missing_frames: 10   # tracker 连续缺失超过此帧数后清除
+excavator_speed: 1.0     # 挖掘机平均行进速度（m/s），用于 TTC 计算

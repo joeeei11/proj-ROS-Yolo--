@@ -1,0 +1,4 @@
+metric,value,threshold,pass
+response_time_mean_ms,105.4,1500,True
+response_time_max_ms,200.5,2000,True
+success_rate_pct,100.0,90,True

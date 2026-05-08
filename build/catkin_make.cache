@@ -1,0 +1,2 @@
+excavator_decision:excavator_description:excavator_gazebo:excavator_monitor:excavator_msgs:excavator_perception:excavator_planner:excavator_risk
+-DCMAKE_BUILD_TYPE=Release -DCATKIN_DEVEL_PREFIX=/home/excavator/excavator_ws/devel -DCMAKE_INSTALL_PREFIX=/home/excavator/excavator_ws/install -G Unix Makefiles

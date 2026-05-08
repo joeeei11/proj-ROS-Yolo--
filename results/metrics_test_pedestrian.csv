@@ -1,0 +1,11 @@
+run_id,timestamp,scenario,event_type,response_time_ms,perception_latency_ms_p95,risk_level,obstacle_type,min_distance_m,success
+1,20260508_195029,test_pedestrian,EMERGENCY_STOP,100.7,,HIGH,person,2.0,True
+2,20260508_195030,test_pedestrian,EMERGENCY_STOP,100.3,,HIGH,person,2.0,True
+3,20260508_195030,test_pedestrian,EMERGENCY_STOP,100.5,,HIGH,person,2.0,True
+4,20260508_195031,test_pedestrian,EMERGENCY_STOP,100.4,,HIGH,person,2.0,True
+5,20260508_195032,test_pedestrian,EMERGENCY_STOP,100.4,,HIGH,person,2.0,True
+6,20260508_195033,test_pedestrian,EMERGENCY_STOP,150.3,,HIGH,person,2.0,True
+7,20260508_195034,test_pedestrian,EMERGENCY_STOP,100.4,,HIGH,person,2.0,True
+8,20260508_195034,test_pedestrian,EMERGENCY_STOP,100.5,,HIGH,person,2.0,True
+9,20260508_195035,test_pedestrian,EMERGENCY_STOP,100.5,,HIGH,person,2.0,True
+10,20260508_195036,test_pedestrian,EMERGENCY_STOP,100.3,,HIGH,person,2.0,True

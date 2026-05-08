@@ -1,0 +1,8 @@
+prefix=/home/excavator/excavator_ws/devel
+
+Name: excavator_gazebo
+Description: Description of excavator_gazebo
+Version: 0.0.0
+Cflags: 
+Libs: -L${prefix}/lib 
+Requires: 

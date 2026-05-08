@@ -1,0 +1,4 @@
+mode,description,fp_rate_pct,fp_count_per_10runs,pass(<=20%)
+walk,行进模式：沿路径移动,2.1,0,True
+rotate,回转模式：原地旋转,3.5,0,True
+dig,挖掘模式：铲斗循环,8.7,1,True

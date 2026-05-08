@@ -1,0 +1,10 @@
+<launch>
+  <node name="fsm_controller"
+        pkg="excavator_decision"
+        type="fsm_controller.py"
+        output="screen"
+        respawn="true">
+    <rosparam command="load"
+              file="$(find excavator_decision)/config/fsm_params.yaml" />
+  </node>
+</launch>

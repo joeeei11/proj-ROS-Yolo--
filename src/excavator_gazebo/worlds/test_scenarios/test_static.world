@@ -1,0 +1,78 @@
+<?xml version="1.0"?>
+<!-- test_static.world: 3个静态障碍物，验证绕行成功 -->
+<sdf version="1.6">
+  <world name="test_static">
+
+    <physics type="ode">
+      <max_step_size>0.001</max_step_size>
+      <real_time_factor>1</real_time_factor>
+      <real_time_update_rate>1000</real_time_update_rate>
+    </physics>
+
+    <include><uri>model://sun</uri></include>
+    <include><uri>model://ground_plane</uri></include>
+
+    <!-- 围栏 -->
+    <model name="fence_north">
+      <static>true</static><pose>0 15 1.0 0 0 0</pose>
+      <link name="link">
+        <collision name="c"><geometry><box><size>30 0.2 2.0</size></box></geometry></collision>
+        <visual name="v"><geometry><box><size>30 0.2 2.0</size></box></geometry>
+          <material><script><uri>file://media/materials/scripts/gazebo.material</uri><name>Gazebo/WoodFloor</name></script></material>
+        </visual>
+      </link>
+    </model>
+    <model name="fence_south">
+      <static>true</static><pose>0 -15 1.0 0 0 0</pose>
+      <link name="link">
+        <collision name="c"><geometry><box><size>30 0.2 2.0</size></box></geometry></collision>
+        <visual name="v"><geometry><box><size>30 0.2 2.0</size></box></geometry>
+          <material><script><uri>file://media/materials/scripts/gazebo.material</uri><name>Gazebo/WoodFloor</name></script></material>
+        </visual>
+      </link>
+    </model>
+
+    <!--
+      障碍物布局（挖掘机从 x=0,y=0 出发，目标 x=15,y=0）：
+      obs_A 正前方 5m，迫使绕行
+      obs_B 前方偏右 9m，缩窄通道
+      obs_C 前方偏左 12m，形成 S 形绕行路径
+    -->
+    <model name="obstacle_A">
+      <static>true</static>
+      <pose>5.0 0.0 0.75 0 0 0</pose>
+      <link name="link">
+        <collision name="c"><geometry><box><size>1.0 1.0 1.5</size></box></geometry></collision>
+        <visual name="v">
+          <geometry><box><size>1.0 1.0 1.5</size></box></geometry>
+          <material><script><uri>file://media/materials/scripts/gazebo.material</uri><name>Gazebo/Grey</name></script></material>
+        </visual>
+      </link>
+    </model>
+
+    <model name="obstacle_B">
+      <static>true</static>
+      <pose>9.0 2.5 0.75 0 0 0</pose>
+      <link name="link">
+        <collision name="c"><geometry><box><size>0.8 0.8 1.5</size></box></geometry></collision>
+        <visual name="v">
+          <geometry><box><size>0.8 0.8 1.5</size></box></geometry>
+          <material><script><uri>file://media/materials/scripts/gazebo.material</uri><name>Gazebo/Red</name></script></material>
+        </visual>
+      </link>
+    </model>
+
+    <model name="obstacle_C">
+      <static>true</static>
+      <pose>12.0 -2.0 0.75 0 0 0</pose>
+      <link name="link">
+        <collision name="c"><geometry><box><size>1.2 1.0 1.5</size></box></geometry></collision>
+        <visual name="v">
+          <geometry><box><size>1.2 1.0 1.5</size></box></geometry>
+          <material><script><uri>file://media/materials/scripts/gazebo.material</uri><name>Gazebo/Blue</name></script></material>
+        </visual>
+      </link>
+    </model>
+
+  </world>
+</sdf>

@@ -1,0 +1,10 @@
+std_msgs/Header header
+string obstacle_id
+string obstacle_type
+float32 distance
+float32 relative_velocity
+float32 ttc
+float32 risk_score
+uint8 risk_level
+geometry_msgs/PoseStamped pose
+geometry_msgs/Vector3 velocity_vec

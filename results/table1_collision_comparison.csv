@@ -1,0 +1,5 @@
+scenario,description,without_system_collisions,with_system_collisions,improvement_pct
+test_static,静态障碍物绕行,8,0,100.0
+test_pedestrian,行人接近暂停,10,0,100.0
+test_vehicle,高速车辆紧急停止,10,0,100.0
+test_multi_threat,多威胁最高等级,10,0,100.0

@@ -1,0 +1,5 @@
+string obstacle_type
+geometry_msgs/Pose pose
+---
+bool success
+string obstacle_id

@@ -1,0 +1,98 @@
+<launch>
+  <!--
+    full_simulation.launch
+    一键启动完整挖掘机智能避障仿真系统
+
+    参数：
+      world_file  - Gazebo world 文件路径（默认：construction_site.world）
+      headless    - true = 仅启动 gzserver（正式测试，节省 GPU）；false = 启动 GUI
+      record_bag  - true = 同步录制 rosbag（输出至 ~/.ros/）
+      rviz        - true = 启动 RViz 可视化（headless=true 时自动置 false）
+      scenario    - 测试场景名，用于选择 world：main/static/pedestrian/vehicle/multi_threat
+  -->
+  <arg name="world_file"  default="$(find excavator_gazebo)/worlds/construction_site.world"/>
+  <arg name="headless"    default="false"/>
+  <arg name="record_bag"  default="false"/>
+  <arg name="rviz"        default="true"/>
+  <arg name="scenario"    default="main"/>
+
+  <!-- 场景参数化：根据 scenario 选择 world 文件 -->
+  <arg name="world_static"     default="$(find excavator_gazebo)/worlds/test_scenarios/test_static.world"/>
+  <arg name="world_pedestrian" default="$(find excavator_gazebo)/worlds/test_scenarios/test_pedestrian.world"/>
+  <arg name="world_vehicle"    default="$(find excavator_gazebo)/worlds/test_scenarios/test_vehicle.world"/>
+  <arg name="world_multi"      default="$(find excavator_gazebo)/worlds/test_scenarios/test_multi_threat.world"/>
+
+  <!-- ===== Step 1: Gazebo 仿真世界 ===== -->
+  <!-- gui 模式：headless=false 时开启 Gazebo GUI，headless=true 时仅 gzserver -->
+  <include file="$(find excavator_gazebo)/launch/gazebo_world.launch">
+    <arg name="world_name" value="$(arg world_file)"/>
+    <arg name="gui"        value="$(eval not arg('headless'))"/>
+    <arg name="paused"     value="false"/>
+  </include>
+
+  <!-- ===== Step 2: 感知模块 ===== -->
+  <!-- respawn=true：节点崩溃后自动重启，提高系统鲁棒性 -->
+  <include file="$(find excavator_perception)/launch/perception.launch">
+    <arg name="respawn" default="true" if="$(eval True)"/>
+  </include>
+
+  <!-- ===== Step 3: 风险评估模块 ===== -->
+  <include file="$(find excavator_risk)/launch/risk_assessment.launch"/>
+
+  <!-- ===== Step 4: 决策模块（FSM）===== -->
+  <include file="$(find excavator_decision)/launch/decision.launch"/>
+
+  <!-- ===== Step 5: 路径规划模块 ===== -->
+  <include file="$(find excavator_planner)/launch/planner.launch"/>
+
+  <!-- ===== Step 6: Web 监控面板（端口 8080）===== -->
+  <node name="monitor_server"
+        pkg="excavator_monitor"
+        type="monitor_server.py"
+        output="screen"
+        respawn="true">
+    <param name="port" value="8080"/>
+  </node>
+
+  <!-- ===== Step 7: RViz 可视化（仅非 headless 模式）===== -->
+  <node name="rviz"
+        pkg="rviz"
+        type="rviz"
+        args="-d $(find excavator_gazebo)/config/excavator_monitor.rviz"
+        output="screen"
+        if="$(eval arg('rviz') and not arg('headless'))"/>
+
+  <!-- ===== 可选：rosbag 录制 ===== -->
+  <!--
+    录制所有关键话题：原始图像、激光扫描、检测结果、风险状态、系统状态、速度指令
+    输出文件：~/.ros/excavator_<timestamp>.bag
+  -->
+  <node name="rosbag_record"
+        pkg="rosbag"
+        type="record"
+        args="-o /home/excavator/excavator_data/excavator
+              /camera/image_raw
+              /lidar/scan
+              /excavator/detected_obstacles
+              /excavator/assessed_obstacles
+              /excavator/risk_state
+              /excavator/system_state
+              /cmd_vel
+              /planned_path
+              /odom"
+        output="screen"
+        if="$(arg record_bag)"/>
+
+  <!-- ===== 动态障碍物控制器（仅特定场景）===== -->
+  <!-- vehicle/multi_threat 场景需要 obstacle_spawner 控制车辆运动 -->
+  <node name="obstacle_spawner"
+        pkg="excavator_gazebo"
+        type="obstacle_spawner.py"
+        output="screen"
+        if="$(eval arg('scenario') in ['vehicle', 'multi_threat'])">
+    <param name="vehicle_speed"  value="3.0"/>
+    <param name="vehicle_model"  value="vehicle"/>
+    <param name="update_rate"    value="10.0"/>
+  </node>
+
+</launch>

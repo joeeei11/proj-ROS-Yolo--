@@ -1,0 +1,10 @@
+<launch>
+  <node name="rrt_star_planner"
+        pkg="excavator_planner"
+        type="rrt_star_planner"
+        output="screen"
+        respawn="true">
+    <rosparam command="load"
+              file="$(find excavator_planner)/config/planner_params.yaml" />
+  </node>
+</launch>

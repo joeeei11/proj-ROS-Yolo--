@@ -1,0 +1,6 @@
+metric,value_ms,threshold_ms,pass
+mean,105.4,1500,True
+std,24.8,-,-
+max,200.5,2000,True
+min,50.5,-,-
+p95,200.4,-,-

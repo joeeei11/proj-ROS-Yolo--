@@ -1,0 +1,11 @@
+run_id,timestamp,scenario,event_type,response_time_ms,perception_latency_ms_p95,risk_level,obstacle_type,min_distance_m,success
+1,20260508_195021,test_static,CAUTION,50.5,,MEDIUM,obstacle,3.0,True
+2,20260508_195022,test_static,CAUTION,100.3,,MEDIUM,obstacle,3.0,True
+3,20260508_195022,test_static,CAUTION,100.3,,MEDIUM,obstacle,3.0,True
+4,20260508_195023,test_static,CAUTION,100.4,,MEDIUM,obstacle,3.0,True
+5,20260508_195024,test_static,CAUTION,100.4,,MEDIUM,obstacle,3.0,True
+6,20260508_195025,test_static,CAUTION,100.4,,MEDIUM,obstacle,3.0,True
+7,20260508_195026,test_static,CAUTION,100.4,,MEDIUM,obstacle,3.0,True
+8,20260508_195026,test_static,CAUTION,100.5,,MEDIUM,obstacle,3.0,True
+9,20260508_195027,test_static,CAUTION,100.4,,MEDIUM,obstacle,3.0,True
+10,20260508_195028,test_static,CAUTION,100.4,,MEDIUM,obstacle,3.0,True

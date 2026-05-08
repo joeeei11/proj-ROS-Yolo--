@@ -1,0 +1,7 @@
+# FSM Controller Parameters
+# Units: speed in m/s, acceleration in m/s^2, time in s
+
+nominal_speed: 1.0          # normal operating speed (m/s)
+max_deceleration: 0.5       # max deceleration for velocity smoothing (m/s^2)
+paused_check_interval: 5.0  # how often PAUSED state checks for auto-resume (s)
+publish_rate: 10.0          # FSM state & cmd_vel publish rate (Hz)

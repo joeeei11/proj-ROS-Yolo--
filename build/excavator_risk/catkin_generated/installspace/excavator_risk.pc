@@ -1,0 +1,8 @@
+prefix=/home/excavator/excavator_ws/install
+
+Name: excavator_risk
+Description: Description of excavator_risk
+Version: 0.0.0
+Cflags: 
+Libs: -L${prefix}/lib 
+Requires: 

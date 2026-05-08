@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>挖掘机避障系统监控面板</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: 'Segoe UI', Arial, sans-serif; background: #1a1a2e; color: #e0e0e0; min-height: 100vh; }
+  .header { background: linear-gradient(135deg, #16213e, #0f3460); padding: 16px 24px; display: flex; align-items: center; justify-content: space-between; border-bottom: 2px solid #e94560; }
+  .header h1 { font-size: 1.3rem; color: #fff; }
+  .header .uptime { font-size: 0.85rem; color: #a0a0c0; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; padding: 16px; }
+  .card { background: #16213e; border-radius: 10px; padding: 18px; border-left: 4px solid #0f3460; transition: border-color 0.3s; }
+  .card.NORMAL     { border-color: #2ecc71; }
+  .card.CAUTION    { border-color: #f39c12; }
+  .card.PAUSED     { border-color: #e67e22; }
+  .card.EMERGENCY_STOP { border-color: #e74c3c; animation: pulse 0.8s infinite alternate; }
+  .card.LOW    { border-color: #2ecc71; }
+  .card.MEDIUM { border-color: #f39c12; }
+  .card.HIGH   { border-color: #e74c3c; }
+  @keyframes pulse { from { box-shadow: 0 0 0 0 rgba(231,76,60,0.4); } to { box-shadow: 0 0 12px 4px rgba(231,76,60,0.6); } }
+  .card-label { font-size: 0.75rem; color: #a0a0c0; text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: 8px; }
+  .card-value { font-size: 1.8rem; font-weight: 700; color: #fff; }
+  .card-sub   { font-size: 0.8rem; color: #a0a0c0; margin-top: 4px; }
+  .state-NORMAL { color: #2ecc71; }
+  .state-CAUTION { color: #f39c12; }
+  .state-PAUSED  { color: #e67e22; }
+  .state-EMERGENCY_STOP { color: #e74c3c; }
+  .level-LOW { color: #2ecc71; }
+  .level-MEDIUM { color: #f39c12; }
+  .level-HIGH { color: #e74c3c; }
+  .section { padding: 0 16px 16px; }
+  .section-title { font-size: 0.9rem; color: #a0a0c0; text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: 10px; }
+  .charts-row { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  .chart-card { background: #16213e; border-radius: 10px; padding: 16px; }
+  .chart-card canvas { max-height: 200px; }
+  .table-card { background: #16213e; border-radius: 10px; overflow: hidden; }
+  table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
+  th { background: #0f3460; padding: 10px 12px; text-align: left; color: #a0c4ff; font-weight: 600; text-transform: uppercase; font-size: 0.75rem; letter-spacing: 0.05em; }
+  td { padding: 9px 12px; border-bottom: 1px solid #1a2840; }
+  tr:last-child td { border-bottom: none; }
+  tr:hover td { background: rgba(255,255,255,0.03); }
+  .badge { display: inline-block; padding: 2px 8px; border-radius: 12px; font-size: 0.75rem; font-weight: 600; }
+  .badge-LOW      { background: rgba(46,204,113,0.2); color: #2ecc71; }
+  .badge-MEDIUM   { background: rgba(243,156,18,0.2); color: #f39c12; }
+  .badge-HIGH     { background: rgba(231,76,60,0.2); color: #e74c3c; }
+  .badge-UNKNOWN  { background: rgba(160,160,192,0.2); color: #a0a0c0; }
+  .status-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; margin-right: 6px; }
+  .dot-ok { background: #2ecc71; }
+  .dot-warn { background: #f39c12; }
+  .dot-err { background: #e74c3c; }
+  .footer { padding: 12px 24px; text-align: center; color: #505070; font-size: 0.78rem; border-top: 1px solid #1a2840; margin-top: 8px; }
+  @media (max-width: 640px) { .charts-row { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+<div class="header">
+  <div>
+    <h1>&#9881; ExcavatorSafeNav &mdash; 实时监控面板</h1>
+    <div class="uptime" id="uptime-text">连接中...</div>
+  </div>
+  <div id="conn-status" style="font-size:0.85rem;"><span class="status-dot dot-warn" id="conn-dot"></span><span id="conn-label">连接中</span></div>
+</div>
+
+<!-- 状态卡片 -->
+<div class="grid" id="cards">
+  <div class="card" id="card-state">
+    <div class="card-label">FSM 状态</div>
+    <div class="card-value state-NORMAL" id="val-state">NORMAL</div>
+    <div class="card-sub" id="val-state-dur">持续 0s</div>
+  </div>
+  <div class="card" id="card-risk">
+    <div class="card-label">风险等级</div>
+    <div class="card-value level-LOW" id="val-risk-level">LOW</div>
+    <div class="card-sub" id="val-risk-sub">主威胁: &mdash;</div>
+  </div>
+  <div class="card">
+    <div class="card-label">最近障碍距离</div>
+    <div class="card-value" id="val-dist">&mdash; m</div>
+    <div class="card-sub" id="val-ttc">TTC: &mdash; s</div>
+  </div>
+  <div class="card">
+    <div class="card-label">感知帧率</div>
+    <div class="card-value" id="val-fps">&mdash; Hz</div>
+    <div class="card-sub" id="val-obstacles">障碍物: 0 个</div>
+  </div>
+  <div class="card">
+    <div class="card-label">响应延迟</div>
+    <div class="card-value" id="val-latency">&mdash; ms</div>
+    <div class="card-sub">FSM 响应时间估计</div>
+  </div>
+  <div class="card">
+    <div class="card-label">系统在线时长</div>
+    <div class="card-value" id="val-uptime">0s</div>
+    <div class="card-sub" id="val-uptime-sub">&mdash;</div>
+  </div>
+</div>
+
+<!-- 图表 -->
+<div class="section">
+  <div class="section-title">性能趋势（最近 60 秒）</div>
+  <div class="charts-row">
+    <div class="chart-card">
+      <div style="font-size:0.8rem;color:#a0a0c0;margin-bottom:8px;">FSM 状态时间轴</div>
+      <canvas id="stateChart"></canvas>
+    </div>
+    <div class="chart-card">
+      <div style="font-size:0.8rem;color:#a0a0c0;margin-bottom:8px;">最近障碍距离（m）</div>
+      <canvas id="distChart"></canvas>
+    </div>
+  </div>
+</div>
+
+<!-- 障碍物列表 -->
+<div class="section">
+  <div class="section-title">当前障碍物列表</div>
+  <div class="table-card">
+    <table>
+      <thead>
+        <tr><th>ID</th><th>类型</th><th>距离 (m)</th><th>TTC (s)</th><th>风险分</th><th>风险等级</th></tr>
+      </thead>
+      <tbody id="obs-tbody">
+        <tr><td colspan="6" style="color:#505070;text-align:center;padding:20px;">等待数据...</td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<div class="footer">ExcavatorSafeNav v1.0 &middot; 仅供监控，不提供控制操作 &middot; 刷新间隔 1s</div>
+
+<script>
+const MAX_POINTS = 60;
+const stateHistory = [], distHistory = [], labels = [];
+let chartState, chartDist;
+
+const STATE_COLOR = { NORMAL:'#2ecc71', CAUTION:'#f39c12', PAUSED:'#e67e22', EMERGENCY_STOP:'#e74c3c' };
+const STATE_NUM   = { NORMAL:0, CAUTION:1, PAUSED:2, EMERGENCY_STOP:3 };
+
+function initCharts() {
+  const ctxS = document.getElementById('stateChart').getContext('2d');
+  chartState = new Chart(ctxS, {
+    type: 'line',
+    data: { labels, datasets: [{ label: 'FSM State (0=N,1=C,2=P,3=E)', data: stateHistory,
+      borderColor: '#5dade2', backgroundColor: 'rgba(93,173,226,0.1)',
+      tension: 0, pointRadius: 2, fill: true, stepped: true }] },
+    options: { animation:false, scales: {
+      x: { ticks:{color:'#a0a0c0',maxTicksLimit:6}, grid:{color:'rgba(255,255,255,0.05)'} },
+      y: { ticks:{color:'#a0a0c0'}, grid:{color:'rgba(255,255,255,0.05)'}, min:0, max:3.5 }
+    }, plugins:{legend:{labels:{color:'#a0a0c0',font:{size:10}}}} }
+  });
+  const ctxD = document.getElementById('distChart').getContext('2d');
+  chartDist = new Chart(ctxD, {
+    type: 'line',
+    data: { labels, datasets: [{ label: 'Min Distance (m)', data: distHistory,
+      borderColor: '#e74c3c', backgroundColor: 'rgba(231,76,60,0.1)',
+      tension: 0.3, pointRadius: 2, fill: true }] },
+    options: { animation:false, scales: {
+      x: { ticks:{color:'#a0a0c0',maxTicksLimit:6}, grid:{color:'rgba(255,255,255,0.05)'} },
+      y: { ticks:{color:'#a0a0c0'}, grid:{color:'rgba(255,255,255,0.05)'}, min:0, max:15 }
+    }, plugins:{legend:{labels:{color:'#a0a0c0',font:{size:10}}},
+      annotation:{annotations:{line1:{type:'line',yMin:1,yMax:1,borderColor:'red',borderWidth:1,borderDash:[4,4]}}}} }
+  });
+}
+
+function pushHistory(stateNum, dist) {
+  const now = new Date().toLocaleTimeString('zh-CN', {hour12:false,hour:'2-digit',minute:'2-digit',second:'2-digit'});
+  labels.push(now); stateHistory.push(stateNum); distHistory.push(Math.min(15, dist));
+  if (labels.length > MAX_POINTS) { labels.shift(); stateHistory.shift(); distHistory.shift(); }
+  chartState.update(); chartDist.update();
+}
+
+function fmtUptime(sec) {
+  if (sec < 60) return sec + 's';
+  if (sec < 3600) return Math.floor(sec/60) + 'm ' + (sec%60) + 's';
+  return Math.floor(sec/3600) + 'h ' + Math.floor((sec%3600)/60) + 'm';
+}
+
+function updateUI(data) {
+  const s = data.system_state, r = data.risk, obs = data.obstacles, m = data.metrics;
+  // FSM 状态卡片
+  const sName = s.state_name || 'NORMAL';
+  document.getElementById('val-state').textContent = sName;
+  document.getElementById('val-state').className = 'card-value state-' + sName;
+  document.getElementById('card-state').className = 'card ' + sName;
+  document.getElementById('val-state-dur').textContent = '持续 ' + s.state_duration + 's';
+  // 风险卡片
+  const lName = r.level_name || 'LOW';
+  document.getElementById('val-risk-level').textContent = lName;
+  document.getElementById('val-risk-level').className = 'card-value level-' + lName;
+  document.getElementById('card-risk').className = 'card ' + lName;
+  document.getElementById('val-risk-sub').textContent = '主威胁: ' + (r.primary_threat_id || '—');
+  // 距离和 TTC
+  document.getElementById('val-dist').textContent = r.min_distance < 90 ? r.min_distance.toFixed(2) + ' m' : '— m';
+  document.getElementById('val-ttc').textContent = r.min_ttc < 900 ? 'TTC: ' + r.min_ttc.toFixed(1) + ' s' : 'TTC: — s';
+  // 感知帧率
+  document.getElementById('val-fps').textContent = (m.perception_fps || 0).toFixed(1) + ' Hz';
+  document.getElementById('val-obstacles').textContent = '障碍物: ' + (m.total_obstacles || 0) + ' 个';
+  // 响应延迟
+  document.getElementById('val-latency').textContent = (m.fsm_latency_ms || '—') + ' ms';
+  // 在线时长
+  const up = m.uptime_sec || 0;
+  document.getElementById('val-uptime').textContent = fmtUptime(up);
+  // 图表
+  pushHistory(s.state || 0, r.min_distance < 90 ? r.min_distance : 15);
+  // 障碍物表格
+  const tbody = document.getElementById('obs-tbody');
+  if (!obs || obs.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="6" style="color:#505070;text-align:center;padding:16px;">当前无障碍物</td></tr>';
+  } else {
+    tbody.innerHTML = obs.map(o => `<tr>
+      <td>${o.id}</td><td>${o.type}</td>
+      <td>${o.distance.toFixed(2)}</td><td>${o.ttc.toFixed(1)}</td>
+      <td>${o.risk_score.toFixed(3)}</td>
+      <td><span class="badge badge-${o.risk_level}">${o.risk_level}</span></td>
+    </tr>`).join('');
+  }
+  // 连接指示
+  document.getElementById('conn-dot').className = 'status-dot dot-ok';
+  document.getElementById('conn-label').textContent = '已连接';
+  document.getElementById('uptime-text').textContent = '系统运行 ' + fmtUptime(up) + ' | 最后更新 ' + new Date().toLocaleTimeString();
+}
+
+function startSSE() {
+  const evtSrc = new EventSource('/api/stream');
+  evtSrc.onmessage = e => { try { updateUI(JSON.parse(e.data)); } catch(err) {} };
+  evtSrc.onerror = () => {
+    document.getElementById('conn-dot').className = 'status-dot dot-err';
+    document.getElementById('conn-label').textContent = '断开';
+    setTimeout(startSSE, 3000);
+    evtSrc.close();
+  };
+}
+
+window.onload = () => { initCharts(); startSSE(); };
+</script>
+</body>
+</html>

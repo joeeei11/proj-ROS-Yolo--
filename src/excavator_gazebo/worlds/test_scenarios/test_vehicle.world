@@ -1,0 +1,74 @@
+<?xml version="1.0"?>
+<!-- test_vehicle.world: 1辆直线高速接近车辆(3m/s)，验证 EMERGENCY_STOP ≤1.5s -->
+<sdf version="1.6">
+  <world name="test_vehicle">
+
+    <physics type="ode">
+      <max_step_size>0.001</max_step_size>
+      <real_time_factor>1</real_time_factor>
+      <real_time_update_rate>1000</real_time_update_rate>
+    </physics>
+
+    <include><uri>model://sun</uri></include>
+    <include><uri>model://ground_plane</uri></include>
+
+    <!--
+      车辆：从 x=20 直线驶向 x=0（挖掘机位置），速度 3m/s
+      obstacle_spawner.py 负责动态控制车辆速度
+      这里放置初始静态位置，spawner 启动后接管控制
+
+      初始距离 20m，3m/s → 约 6.7s 到达挖掘机
+      TTC 从 6.7s 降至 1.5s 时（距离约 4.5m）触发 EMERGENCY_STOP
+    -->
+    <model name="vehicle">
+      <pose>20.0 0.0 0.5 0 0 3.14159</pose>
+      <link name="body">
+        <inertial>
+          <mass>1500.0</mass>
+          <inertia>
+            <ixx>500</ixx><ixy>0</ixy><ixz>0</ixz>
+            <iyy>2000</iyy><iyz>0</iyz>
+            <izz>2000</izz>
+          </inertia>
+        </inertial>
+        <collision name="c">
+          <geometry><box><size>4.5 2.0 1.5</size></box></geometry>
+        </collision>
+        <visual name="v">
+          <geometry><box><size>4.5 2.0 1.5</size></box></geometry>
+          <material>
+            <script>
+              <uri>file://media/materials/scripts/gazebo.material</uri>
+              <name>Gazebo/Orange</name>
+            </script>
+          </material>
+        </visual>
+      </link>
+      <!-- 速度由 obstacle_spawner 通过 /vehicle_cmd_vel 控制 -->
+    </model>
+
+    <!-- 起点/终点标记 -->
+    <model name="excavator_start_marker">
+      <static>true</static>
+      <pose>0 0 0.05 0 0 0</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><cylinder><radius>0.5</radius><length>0.1</length></cylinder></geometry>
+          <material><script><uri>file://media/materials/scripts/gazebo.material</uri><name>Gazebo/Green</name></script></material>
+        </visual>
+      </link>
+    </model>
+
+    <model name="vehicle_start_marker">
+      <static>true</static>
+      <pose>20 0 0.05 0 0 0</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><cylinder><radius>0.5</radius><length>0.1</length></cylinder></geometry>
+          <material><script><uri>file://media/materials/scripts/gazebo.material</uri><name>Gazebo/Red</name></script></material>
+        </visual>
+      </link>
+    </model>
+
+  </world>
+</sdf>

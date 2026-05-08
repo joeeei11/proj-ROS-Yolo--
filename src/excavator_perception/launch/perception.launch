@@ -1,0 +1,35 @@
+<launch>
+  <!-- YOLOv5 检测节点 -->
+  <node name="yolov5_detector" pkg="excavator_perception"
+        type="yolov5_detector.py" output="screen" respawn="true">
+    <rosparam file="$(find excavator_perception)/config/detector_params.yaml"
+              command="load"/>
+    <!-- 覆盖权重路径，使用 ROS find 宏 -->
+    <param name="weights_path"
+           value="$(find excavator_perception)/models/best.pt"/>
+  </node>
+
+  <!-- DeepSort 跟踪节点 -->
+  <node name="deepsort_tracker" pkg="excavator_perception"
+        type="deepsort_tracker.py" output="screen" respawn="true">
+    <param name="max_age"           value="30"/>
+    <param name="n_init"            value="3"/>
+    <param name="max_iou_distance"  value="0.7"/>
+    <param name="max_cosine_distance" value="0.2"/>
+    <param name="embedder_gpu"      value="true"/>
+  </node>
+
+  <!-- 激光雷达处理节点 -->
+  <node name="lidar_processor" pkg="excavator_perception"
+        type="lidar_processor.py" output="screen" respawn="true">
+    <param name="num_sectors" value="8"/>
+    <param name="min_range"   value="0.1"/>
+    <param name="max_range"   value="20.0"/>
+  </node>
+
+  <!-- 多模态融合节点 -->
+  <node name="sensor_fusion" pkg="excavator_perception"
+        type="sensor_fusion.py" output="screen" respawn="true">
+    <param name="angle_thresh_rad" value="0.2"/>
+  </node>
+</launch>
