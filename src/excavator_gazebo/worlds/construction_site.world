@@ -35,17 +35,20 @@
       <uri>model://ground_plane</uri>
     </include>
 
-    <!-- ===== 围栏（25m × 25m 施工区域，高 2m） ===== -->
+    <!--
+      围栏高度从 2.0m 提升至 5.0m（中心 z=2.5m），确保激光雷达（扫描面 z≈2.95m）
+      能检测到围栏边界。decisions.md ADR-010 记录原因。
+    -->
     <!-- 北侧围栏 y=12.5 -->
     <model name="fence_north">
       <static>true</static>
-      <pose>0 12.5 1.0 0 0 0</pose>
+      <pose>0 12.5 2.5 0 0 0</pose>
       <link name="link">
         <collision name="collision">
-          <geometry><box><size>25.0 0.2 2.0</size></box></geometry>
+          <geometry><box><size>25.0 0.2 5.0</size></box></geometry>
         </collision>
         <visual name="visual">
-          <geometry><box><size>25.0 0.2 2.0</size></box></geometry>
+          <geometry><box><size>25.0 0.2 5.0</size></box></geometry>
           <material>
             <script>
               <uri>file://media/materials/scripts/gazebo.material</uri>
@@ -59,13 +62,13 @@
     <!-- 南侧围栏 y=-12.5 -->
     <model name="fence_south">
       <static>true</static>
-      <pose>0 -12.5 1.0 0 0 0</pose>
+      <pose>0 -12.5 2.5 0 0 0</pose>
       <link name="link">
         <collision name="collision">
-          <geometry><box><size>25.0 0.2 2.0</size></box></geometry>
+          <geometry><box><size>25.0 0.2 5.0</size></box></geometry>
         </collision>
         <visual name="visual">
-          <geometry><box><size>25.0 0.2 2.0</size></box></geometry>
+          <geometry><box><size>25.0 0.2 5.0</size></box></geometry>
           <material>
             <script>
               <uri>file://media/materials/scripts/gazebo.material</uri>
@@ -79,13 +82,13 @@
     <!-- 东侧围栏 x=12.5 -->
     <model name="fence_east">
       <static>true</static>
-      <pose>12.5 0 1.0 0 0 1.5708</pose>
+      <pose>12.5 0 2.5 0 0 1.5708</pose>
       <link name="link">
         <collision name="collision">
-          <geometry><box><size>25.0 0.2 2.0</size></box></geometry>
+          <geometry><box><size>25.0 0.2 5.0</size></box></geometry>
         </collision>
         <visual name="visual">
-          <geometry><box><size>25.0 0.2 2.0</size></box></geometry>
+          <geometry><box><size>25.0 0.2 5.0</size></box></geometry>
           <material>
             <script>
               <uri>file://media/materials/scripts/gazebo.material</uri>
@@ -99,13 +102,13 @@
     <!-- 西侧围栏 x=-12.5 -->
     <model name="fence_west">
       <static>true</static>
-      <pose>-12.5 0 1.0 0 0 1.5708</pose>
+      <pose>-12.5 0 2.5 0 0 1.5708</pose>
       <link name="link">
         <collision name="collision">
-          <geometry><box><size>25.0 0.2 2.0</size></box></geometry>
+          <geometry><box><size>25.0 0.2 5.0</size></box></geometry>
         </collision>
         <visual name="visual">
-          <geometry><box><size>25.0 0.2 2.0</size></box></geometry>
+          <geometry><box><size>25.0 0.2 5.0</size></box></geometry>
           <material>
             <script>
               <uri>file://media/materials/scripts/gazebo.material</uri>
@@ -116,17 +119,20 @@
       </link>
     </model>
 
-    <!-- ===== 建材堆（8个，散布在施工区）===== -->
+    <!--
+      建材堆高度从 0.6~1.5m 提升至 3.5m（中心 z=1.75m），
+      确保激光雷达扫描面（z≈2.95m）穿过建材堆体积内部。
+    -->
     <!-- 建材堆1：砂石堆，东北区域 -->
     <model name="material_pile_1">
       <static>true</static>
-      <pose>8.0 7.0 0.5 0 0 0.3</pose>
+      <pose>8.0 7.0 1.75 0 0 0.3</pose>
       <link name="link">
         <collision name="collision">
-          <geometry><box><size>2.5 1.5 1.0</size></box></geometry>
+          <geometry><box><size>2.5 1.5 3.5</size></box></geometry>
         </collision>
         <visual name="visual">
-          <geometry><box><size>2.5 1.5 1.0</size></box></geometry>
+          <geometry><box><size>2.5 1.5 3.5</size></box></geometry>
           <material>
             <script>
               <uri>file://media/materials/scripts/gazebo.material</uri>
@@ -140,13 +146,13 @@
     <!-- 建材堆2：混凝土块，东侧 -->
     <model name="material_pile_2">
       <static>true</static>
-      <pose>9.0 -2.0 0.6 0 0 0</pose>
+      <pose>9.0 -2.0 1.75 0 0 0</pose>
       <link name="link">
         <collision name="collision">
-          <geometry><box><size>1.8 1.8 1.2</size></box></geometry>
+          <geometry><box><size>1.8 1.8 3.5</size></box></geometry>
         </collision>
         <visual name="visual">
-          <geometry><box><size>1.8 1.8 1.2</size></box></geometry>
+          <geometry><box><size>1.8 1.8 3.5</size></box></geometry>
           <material>
             <script>
               <uri>file://media/materials/scripts/gazebo.material</uri>
@@ -160,13 +166,13 @@
     <!-- 建材堆3：钢管堆，南侧 -->
     <model name="material_pile_3">
       <static>true</static>
-      <pose>3.0 -8.0 0.4 0 0 0</pose>
+      <pose>3.0 -8.0 1.75 0 0 0</pose>
       <link name="link">
         <collision name="collision">
-          <geometry><box><size>3.0 0.8 0.8</size></box></geometry>
+          <geometry><box><size>3.0 0.8 3.5</size></box></geometry>
         </collision>
         <visual name="visual">
-          <geometry><box><size>3.0 0.8 0.8</size></box></geometry>
+          <geometry><box><size>3.0 0.8 3.5</size></box></geometry>
           <material>
             <script>
               <uri>file://media/materials/scripts/gazebo.material</uri>
@@ -180,13 +186,13 @@
     <!-- 建材堆4：模板堆，西南区域 -->
     <model name="material_pile_4">
       <static>true</static>
-      <pose>-6.0 -6.0 0.3 0 0 0.785</pose>
+      <pose>-6.0 -6.0 1.75 0 0 0.785</pose>
       <link name="link">
         <collision name="collision">
-          <geometry><box><size>2.0 3.0 0.6</size></box></geometry>
+          <geometry><box><size>2.0 3.0 3.5</size></box></geometry>
         </collision>
         <visual name="visual">
-          <geometry><box><size>2.0 3.0 0.6</size></box></geometry>
+          <geometry><box><size>2.0 3.0 3.5</size></box></geometry>
           <material>
             <script>
               <uri>file://media/materials/scripts/gazebo.material</uri>
@@ -200,13 +206,13 @@
     <!-- 建材堆5：砖块堆，西侧 -->
     <model name="material_pile_5">
       <static>true</static>
-      <pose>-8.0 2.0 0.5 0 0 0</pose>
+      <pose>-8.0 2.0 1.75 0 0 0</pose>
       <link name="link">
         <collision name="collision">
-          <geometry><box><size>1.5 2.0 1.0</size></box></geometry>
+          <geometry><box><size>1.5 2.0 3.5</size></box></geometry>
         </collision>
         <visual name="visual">
-          <geometry><box><size>1.5 2.0 1.0</size></box></geometry>
+          <geometry><box><size>1.5 2.0 3.5</size></box></geometry>
           <material>
             <script>
               <uri>file://media/materials/scripts/gazebo.material</uri>
@@ -220,13 +226,13 @@
     <!-- 建材堆6：设备箱，北侧 -->
     <model name="material_pile_6">
       <static>true</static>
-      <pose>-2.0 9.0 0.75 0 0 0</pose>
+      <pose>-2.0 9.0 1.75 0 0 0</pose>
       <link name="link">
         <collision name="collision">
-          <geometry><box><size>2.4 1.2 1.5</size></box></geometry>
+          <geometry><box><size>2.4 1.2 3.5</size></box></geometry>
         </collision>
         <visual name="visual">
-          <geometry><box><size>2.4 1.2 1.5</size></box></geometry>
+          <geometry><box><size>2.4 1.2 3.5</size></box></geometry>
           <material>
             <script>
               <uri>file://media/materials/scripts/gazebo.material</uri>
@@ -240,13 +246,13 @@
     <!-- 建材堆7：混凝土管道堆，中北部 -->
     <model name="material_pile_7">
       <static>true</static>
-      <pose>5.0 9.5 0.4 0 0 1.5708</pose>
+      <pose>5.0 9.5 1.75 0 0 1.5708</pose>
       <link name="link">
         <collision name="collision">
-          <geometry><box><size>0.8 3.5 0.8</size></box></geometry>
+          <geometry><box><size>0.8 3.5 3.5</size></box></geometry>
         </collision>
         <visual name="visual">
-          <geometry><box><size>0.8 3.5 0.8</size></box></geometry>
+          <geometry><box><size>0.8 3.5 3.5</size></box></geometry>
           <material>
             <script>
               <uri>file://media/materials/scripts/gazebo.material</uri>
@@ -260,13 +266,13 @@
     <!-- 建材堆8：工具箱，东南角 -->
     <model name="material_pile_8">
       <static>true</static>
-      <pose>9.5 -9.0 0.3 0 0 0.2</pose>
+      <pose>9.5 -9.0 1.75 0 0 0.2</pose>
       <link name="link">
         <collision name="collision">
-          <geometry><box><size>1.2 0.6 0.6</size></box></geometry>
+          <geometry><box><size>1.2 0.6 3.5</size></box></geometry>
         </collision>
         <visual name="visual">
-          <geometry><box><size>1.2 0.6 0.6</size></box></geometry>
+          <geometry><box><size>1.2 0.6 3.5</size></box></geometry>
           <material>
             <script>
               <uri>file://media/materials/scripts/gazebo.material</uri>
@@ -277,16 +283,16 @@
       </link>
     </model>
 
-    <!-- ===== 施工标识：锥形警示柱（4个，沿主通道）===== -->
+    <!-- ===== 施工标识：锥形警示柱（升高为 3m 立柱，确保激光雷达可见）===== -->
     <model name="cone_1">
       <static>true</static>
-      <pose>3.0 1.5 0.3 0 0 0</pose>
+      <pose>3.0 1.5 1.5 0 0 0</pose>
       <link name="link">
         <collision name="collision">
-          <geometry><cylinder><radius>0.15</radius><length>0.6</length></cylinder></geometry>
+          <geometry><cylinder><radius>0.15</radius><length>3.0</length></cylinder></geometry>
         </collision>
         <visual name="visual">
-          <geometry><cylinder><radius>0.15</radius><length>0.6</length></cylinder></geometry>
+          <geometry><cylinder><radius>0.15</radius><length>3.0</length></cylinder></geometry>
           <material>
             <script>
               <uri>file://media/materials/scripts/gazebo.material</uri>
@@ -299,13 +305,13 @@
 
     <model name="cone_2">
       <static>true</static>
-      <pose>3.0 -1.5 0.3 0 0 0</pose>
+      <pose>3.0 -1.5 1.5 0 0 0</pose>
       <link name="link">
         <collision name="collision">
-          <geometry><cylinder><radius>0.15</radius><length>0.6</length></cylinder></geometry>
+          <geometry><cylinder><radius>0.15</radius><length>3.0</length></cylinder></geometry>
         </collision>
         <visual name="visual">
-          <geometry><cylinder><radius>0.15</radius><length>0.6</length></cylinder></geometry>
+          <geometry><cylinder><radius>0.15</radius><length>3.0</length></cylinder></geometry>
           <material>
             <script>
               <uri>file://media/materials/scripts/gazebo.material</uri>

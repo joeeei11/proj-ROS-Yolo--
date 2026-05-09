@@ -300,7 +300,8 @@
       <odometrySource>1</odometrySource>
       <publishWheelTF>false</publishWheelTF>
       <publishOdomTF>true</publishOdomTF>
-      <publishWheelJointState>true</publishWheelJointState>
+      <!-- 关闭 wheel joint state 发布；由 joint_state_publisher 统一发布全部关节，避免双写 /joint_states -->
+      <publishWheelJointState>false</publishWheelJointState>
       <legacyMode>false</legacyMode>
     </plugin>
   </gazebo>

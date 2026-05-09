@@ -9,6 +9,7 @@
 #include <ros/ros.h>
 #include <geometry_msgs/Twist.h>
 #include <nav_msgs/Path.h>
+#include <nav_msgs/Odometry.h>
 #include <excavator_msgs/ObstacleArray.h>
 
 namespace excavator_planner {
@@ -85,11 +86,13 @@ public:
 
 private:
     void obstacleCb(const excavator_msgs::ObstacleArray::ConstPtr& msg);
+    void odomCb(const nav_msgs::Odometry::ConstPtr& msg);
     void planningTimerCb(const ros::TimerEvent&);
     void followingTimerCb(const ros::TimerEvent&);
 
     ros::NodeHandle nh_;
     ros::Subscriber obs_sub_;
+    ros::Subscriber odom_sub_;
     ros::Publisher  path_pub_;
     ros::Publisher  cmd_vel_pub_;
     ros::Timer      planning_timer_;
@@ -100,9 +103,10 @@ private:
     std::vector<Point2D>     current_path_;
     size_t path_idx_{0};
 
-    // Robot pose (dead-reckoned from cmd_vel in simulation)
+    // Robot pose (来自 /odom)
     Point2D current_pos_;
     double  current_yaw_{0.0};
+    bool    odom_received_{false};
 
     Point2D     goal_;
     double      nominal_speed_;

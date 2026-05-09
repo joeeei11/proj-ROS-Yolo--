@@ -24,6 +24,13 @@
               -x 0 -y 0 -z 0.1"
         output="screen"/>
 
+  <!-- joint_state_publisher：发布所有非固定关节的状态（必需，否则 turret/boom/arm/bucket 的 TF 链断开） -->
+  <node name="joint_state_publisher" pkg="joint_state_publisher"
+        type="joint_state_publisher" output="screen">
+    <param name="rate" value="50"/>
+    <param name="use_gui" value="false"/>
+  </node>
+
   <!-- robot_state_publisher -->
   <node name="robot_state_publisher" pkg="robot_state_publisher"
         type="robot_state_publisher" output="screen">

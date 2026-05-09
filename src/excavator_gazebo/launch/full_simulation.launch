@@ -83,14 +83,46 @@
 
   <!-- ===== 动态障碍物控制器（仅特定场景）===== -->
   <!-- vehicle/multi_threat 场景需要 obstacle_spawner 控制车辆运动 -->
+  <!-- respawn=true 防止 Gazebo 慢启动导致 wait_for_service 超时退出后永久不再重启 -->
   <node name="obstacle_spawner"
         pkg="excavator_gazebo"
         type="obstacle_spawner.py"
         output="screen"
+        respawn="true"
+        respawn_delay="3.0"
         if="$(eval arg('scenario') in ['vehicle', 'multi_threat'])">
     <param name="vehicle_speed"  value="3.0"/>
     <param name="vehicle_model"  value="vehicle"/>
     <param name="update_rate"    value="10.0"/>
+    <param name="gazebo_wait_total_sec" value="60.0"/>
+  </node>
+
+  <!-- ===== Actor 物理碰撞同步器 - pedestrian 场景 ===== -->
+  <node name="actor_collider_sync"
+        pkg="excavator_gazebo"
+        type="actor_collider_sync.py"
+        output="screen"
+        respawn="true"
+        respawn_delay="3.0"
+        if="$(eval arg('scenario') == 'pedestrian')">
+    <param name="actor_names_str"    value="pedestrian_1"/>
+    <param name="collider_names_str" value="ped_collider_0"/>
+    <!-- collider_z=2.0: 4.0m 高碰撞体中心在 z=2.0，覆盖激光雷达扫描面 z≈2.95m -->
+    <param name="collider_z"         value="2.0"/>
+  </node>
+
+  <!-- ===== Actor 物理碰撞同步器 - multi_threat 场景 ===== -->
+  <node name="actor_collider_sync"
+        pkg="excavator_gazebo"
+        type="actor_collider_sync.py"
+        output="screen"
+        respawn="true"
+        respawn_delay="3.0"
+        if="$(eval arg('scenario') == 'multi_threat')">
+    <param name="actor_names_str"    value="pedestrian_left,pedestrian_right"/>
+    <param name="collider_names_str" value="ped_collider_0,ped_collider_1"/>
+    <!-- collider_z=2.0: 4.0m 高碰撞体中心在 z=2.0，覆盖激光雷达扫描面 z≈2.95m -->
+    <param name="collider_z"         value="2.0"/>
   </node>
 
 </launch>

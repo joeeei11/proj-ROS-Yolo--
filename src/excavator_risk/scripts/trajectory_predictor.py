@@ -75,20 +75,32 @@ class TrajectoryPredictor:
         for oid in to_del:
             del self._trackers[oid]
 
-    def _compute_ttc(self, distance, vx, vy):
+    def _compute_ttc(self, distance, vx, vy, wx, wy):
         """
         TTC = distance / approach_speed
-        approach_speed = excavator_speed - radial_speed_of_obstacle
-        若障碍物远离（radial_speed > excavator_speed），返回 -1（安全）
+        approach_speed = excavator_speed + (障碍物速度向量 投影到 障碍物→挖掘机方向)
+          - 障碍物朝挖掘机靠近：投影为正 → approach_speed 增大
+          - 障碍物横向通过：投影为 0 → approach_speed = excavator_speed
+          - 障碍物远离：投影为负 → approach_speed 减小，可能为负
+        wx, wy 是障碍物世界坐标（base_footprint 系，米）。
+        若 approach_speed <= 0 返回 -1（安全）。
         """
-        speed = math.sqrt(vx * vx + vy * vy)
-        approach = self.excavator_speed - speed
+        d = math.sqrt(wx * wx + wy * wy)
+        if d < 1e-6:
+            if distance <= 0.0:
+                return 0.0
+            return min(distance / max(self.excavator_speed, 1e-3), 999.0)
+        # 单位向量：障碍物 → 挖掘机原点
+        ux = -wx / d
+        uy = -wy / d
+        radial = vx * ux + vy * uy  # 速度径向分量；>0 表示靠近
+
+        approach = self.excavator_speed + radial
         if approach <= 0.0:
             return -1.0
         if distance <= 0.0:
             return 0.0
-        ttc = distance / approach
-        return min(ttc, 999.0)
+        return min(distance / approach, 999.0)
 
     def _callback(self, msg):
         seen_ids = set()
@@ -101,27 +113,40 @@ class TrajectoryPredictor:
             self.pub.publish(out)
             return
 
-
         for obs in msg.obstacles:
             oid = obs.obstacle_id
             seen_ids.add(oid)
 
-            meas_x = obs.pose.pose.position.x
-            meas_y = obs.pose.pose.position.y
+            # 优先使用 sensor_fusion 写入的世界坐标（米；base_footprint 系）
+            # 若 world_xyz 全零（视觉 track 未匹配到 lidar）则跳过卡尔曼预测，仅透传
+            has_world = not (
+                obs.world_x == 0.0 and obs.world_y == 0.0 and obs.world_z == 0.0
+            )
 
-            kf = self._get_or_create_tracker(oid, meas_x, meas_y)
-            self._trackers[oid]["missing"] = 0
+            if has_world:
+                meas_x = obs.world_x
+                meas_y = obs.world_y
 
-            kf.predict()
-            kf.update(np.array([[meas_x], [meas_y]]))
+                kf = self._get_or_create_tracker(oid, meas_x, meas_y)
+                self._trackers[oid]["missing"] = 0
 
-            vx = float(kf.x[2])
-            vy = float(kf.x[3])
-            obs.velocity_vec.x = vx
-            obs.velocity_vec.y = vy
-            obs.velocity_vec.z = 0.0
-            obs.relative_velocity = math.sqrt(vx * vx + vy * vy)
-            obs.ttc = self._compute_ttc(obs.distance, vx, vy)
+                kf.predict()
+                kf.update(np.array([[meas_x], [meas_y]]))
+
+                vx = float(kf.x[2])
+                vy = float(kf.x[3])
+                obs.velocity_vec.x = vx
+                obs.velocity_vec.y = vy
+                obs.velocity_vec.z = 0.0
+                obs.relative_velocity = math.sqrt(vx * vx + vy * vy)
+                obs.ttc = self._compute_ttc(obs.distance, vx, vy, meas_x, meas_y)
+            else:
+                # 无 world 坐标 → 速度未知，TTC 设为大值（自然得低风险）
+                obs.relative_velocity = 0.0
+                obs.velocity_vec.x = 0.0
+                obs.velocity_vec.y = 0.0
+                obs.velocity_vec.z = 0.0
+                obs.ttc = 999.0
 
             out.obstacles.append(obs)
 

@@ -3,9 +3,19 @@
 weights_path: ""          # 由 launch 文件覆盖为 $(find excavator_perception)/models/best.pt
 conf_thres: 0.5           # 置信度阈值（0~1）
 iou_thres: 0.45           # NMS IoU 阈值
-device: "0"               # GPU 编号；-1 表示强制 CPU 推理
+device: "cpu"             # WSL2 下 Gazebo 占用 GPU，YOLO 用 CPU 避免 cuBLAS 冲突
 img_size: 640             # 推理分辨率（像素，正方形）
-class_names:
-  - "person"
-  - "vehicle"
-  - "obstacle"
+
+# COCO id → 项目类别映射（YOLOv5s 默认 COCO 80 类权重）
+# 仅以下白名单内的检测会进入下游；其他丢弃（避免 toilet/donut 等无关类污染）
+class_filter:
+  "0": person          # COCO person
+  "1": vehicle         # COCO bicycle  → 项目 vehicle
+  "2": vehicle         # COCO car
+  "3": vehicle         # COCO motorcycle
+  "5": vehicle         # COCO bus
+  "7": vehicle         # COCO truck
+
+# 白名单外的类别处理
+include_other: false  # true 时其他类标为 default_class；false 时直接丢弃
+default_class: "obstacle"

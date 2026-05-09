@@ -20,8 +20,12 @@
       初始距离 20m，3m/s → 约 6.7s 到达挖掘机
       TTC 从 6.7s 降至 1.5s 时（距离约 4.5m）触发 EMERGENCY_STOP
     -->
+    <!--
+      车辆高度从 1.5m 提升至 3.0m（中心 z=1.5m），确保激光雷达扫描面（z≈2.95m）穿过车辆。
+      obstacle_spawner._teleport_vehicle 中 z 值同步改为 1.5。
+    -->
     <model name="vehicle">
-      <pose>20.0 0.0 0.5 0 0 3.14159</pose>
+      <pose>20.0 0.0 1.5 0 0 3.14159</pose>
       <link name="body">
         <inertial>
           <mass>1500.0</mass>
@@ -32,10 +36,10 @@
           </inertia>
         </inertial>
         <collision name="c">
-          <geometry><box><size>4.5 2.0 1.5</size></box></geometry>
+          <geometry><box><size>4.5 2.0 3.0</size></box></geometry>
         </collision>
         <visual name="v">
-          <geometry><box><size>4.5 2.0 1.5</size></box></geometry>
+          <geometry><box><size>4.5 2.0 3.0</size></box></geometry>
           <material>
             <script>
               <uri>file://media/materials/scripts/gazebo.material</uri>

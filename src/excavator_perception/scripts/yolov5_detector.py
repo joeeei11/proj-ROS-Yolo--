@@ -38,8 +38,21 @@ class YoloV5DetectorNode:
         self.iou_thres = rospy.get_param("~iou_thres", 0.45)
         device_str = str(rospy.get_param("~device", "0"))
         img_size = rospy.get_param("~img_size", 640)
-        self.class_names = rospy.get_param(
-            "~class_names", ["person", "vehicle", "obstacle"])
+
+        # COCO id → 项目类别白名单（用于 yolov5s.pt 等 COCO 80 类预训练权重）
+        # YAML 中 dict key 是字符串，此处统一转 int
+        raw_filter = rospy.get_param("~class_filter", {
+            0: "person",      # person
+            1: "vehicle",     # bicycle
+            2: "vehicle",     # car
+            3: "vehicle",     # motorcycle
+            5: "vehicle",     # bus
+            7: "vehicle",     # truck
+        })
+        self.class_filter = {int(k): str(v) for k, v in raw_filter.items()}
+        # 白名单外的类别处理：true → 标为 default_class 进入下游；false → 丢弃
+        self.include_other = bool(rospy.get_param("~include_other", False))
+        self.default_class = str(rospy.get_param("~default_class", "obstacle"))
 
         # 初始化设备与模型
         self.device = select_device(device_str)
@@ -105,31 +118,48 @@ class YoloV5DetectorNode:
 
         det = pred[0]
         annotator = Annotator(img0.copy(),
-                              line_width=2, example=str(self.class_names))
+                              line_width=2, example="")
 
         if len(det):
             det[:, :4] = scale_coords(
                 tensor.shape[2:], det[:, :4], img0.shape).round()
             det_cpu = det.cpu().numpy()
 
-            for i, (*xyxy, conf, cls_id) in enumerate(det_cpu):
+            kept = 0
+            for (*xyxy, conf, cls_id) in det_cpu:
                 c = int(cls_id)
-                label = self.class_names[c] if c < len(self.class_names) \
-                    else f"cls{c}"
+                if c in self.class_filter:
+                    label = self.class_filter[c]
+                elif self.include_other:
+                    label = self.default_class
+                else:
+                    continue   # 白名单外的检测直接丢弃，避免 toilet/donut 等无关类污染下游
+
                 obs = ObstacleInfo()
                 obs.header = msg.header
-                obs.obstacle_id = f"det_{i}"
+                obs.obstacle_id = f"det_{kept}"
                 obs.obstacle_type = label
                 obs.distance = 0.0          # lidar 融合后填充
                 obs.risk_level = 0          # risk assessor 填充
-                # 归一化像素中心作为临时位姿占位
+
+                # 真实像素 bbox（供 deepsort_tracker 提取 ReID 特征 / sensor_fusion 投影匹配）
+                obs.bbox_x1 = float(xyxy[0])
+                obs.bbox_y1 = float(xyxy[1])
+                obs.bbox_x2 = float(xyxy[2])
+                obs.bbox_y2 = float(xyxy[3])
+
+                # pose：保留归一化中心 + 置信度兼容旧下游；新下游应优先使用 bbox + world_xyz
                 cx = float((xyxy[0] + xyxy[2]) / 2) / img0.shape[1]
                 cy = float((xyxy[1] + xyxy[3]) / 2) / img0.shape[0]
                 obs.pose.header = msg.header
                 obs.pose.pose.position.x = cx
                 obs.pose.pose.position.y = cy
                 obs.pose.pose.position.z = float(conf)
+
+                # world_xyz 字段保持默认 0；由 sensor_fusion 节点用 lidar 深度反投影后填入
+
                 array_msg.obstacles.append(obs)
+                kept += 1
 
                 annotator.box_label(
                     xyxy, f"{label} {conf:.2f}", color=colors(c, True))

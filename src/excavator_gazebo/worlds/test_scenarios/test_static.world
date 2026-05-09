@@ -12,21 +12,21 @@
     <include><uri>model://sun</uri></include>
     <include><uri>model://ground_plane</uri></include>
 
-    <!-- 围栏 -->
+    <!-- 围栏（高 5m，确保激光雷达 z≈2.95m 扫描面穿过围栏） -->
     <model name="fence_north">
-      <static>true</static><pose>0 15 1.0 0 0 0</pose>
+      <static>true</static><pose>0 15 2.5 0 0 0</pose>
       <link name="link">
-        <collision name="c"><geometry><box><size>30 0.2 2.0</size></box></geometry></collision>
-        <visual name="v"><geometry><box><size>30 0.2 2.0</size></box></geometry>
+        <collision name="c"><geometry><box><size>30 0.2 5.0</size></box></geometry></collision>
+        <visual name="v"><geometry><box><size>30 0.2 5.0</size></box></geometry>
           <material><script><uri>file://media/materials/scripts/gazebo.material</uri><name>Gazebo/WoodFloor</name></script></material>
         </visual>
       </link>
     </model>
     <model name="fence_south">
-      <static>true</static><pose>0 -15 1.0 0 0 0</pose>
+      <static>true</static><pose>0 -15 2.5 0 0 0</pose>
       <link name="link">
-        <collision name="c"><geometry><box><size>30 0.2 2.0</size></box></geometry></collision>
-        <visual name="v"><geometry><box><size>30 0.2 2.0</size></box></geometry>
+        <collision name="c"><geometry><box><size>30 0.2 5.0</size></box></geometry></collision>
+        <visual name="v"><geometry><box><size>30 0.2 5.0</size></box></geometry>
           <material><script><uri>file://media/materials/scripts/gazebo.material</uri><name>Gazebo/WoodFloor</name></script></material>
         </visual>
       </link>
@@ -37,14 +37,17 @@
       obs_A 正前方 5m，迫使绕行
       obs_B 前方偏右 9m，缩窄通道
       obs_C 前方偏左 12m，形成 S 形绕行路径
+
+      高度从 1.5m 提升至 3.5m（中心 z=1.75m），
+      确保激光雷达扫描面（z≈2.95m）穿过障碍物体积。
     -->
     <model name="obstacle_A">
       <static>true</static>
-      <pose>5.0 0.0 0.75 0 0 0</pose>
+      <pose>5.0 0.0 1.75 0 0 0</pose>
       <link name="link">
-        <collision name="c"><geometry><box><size>1.0 1.0 1.5</size></box></geometry></collision>
+        <collision name="c"><geometry><box><size>1.0 1.0 3.5</size></box></geometry></collision>
         <visual name="v">
-          <geometry><box><size>1.0 1.0 1.5</size></box></geometry>
+          <geometry><box><size>1.0 1.0 3.5</size></box></geometry>
           <material><script><uri>file://media/materials/scripts/gazebo.material</uri><name>Gazebo/Grey</name></script></material>
         </visual>
       </link>
@@ -52,11 +55,11 @@
 
     <model name="obstacle_B">
       <static>true</static>
-      <pose>9.0 2.5 0.75 0 0 0</pose>
+      <pose>9.0 2.5 1.75 0 0 0</pose>
       <link name="link">
-        <collision name="c"><geometry><box><size>0.8 0.8 1.5</size></box></geometry></collision>
+        <collision name="c"><geometry><box><size>0.8 0.8 3.5</size></box></geometry></collision>
         <visual name="v">
-          <geometry><box><size>0.8 0.8 1.5</size></box></geometry>
+          <geometry><box><size>0.8 0.8 3.5</size></box></geometry>
           <material><script><uri>file://media/materials/scripts/gazebo.material</uri><name>Gazebo/Red</name></script></material>
         </visual>
       </link>
@@ -64,11 +67,11 @@
 
     <model name="obstacle_C">
       <static>true</static>
-      <pose>12.0 -2.0 0.75 0 0 0</pose>
+      <pose>12.0 -2.0 1.75 0 0 0</pose>
       <link name="link">
-        <collision name="c"><geometry><box><size>1.2 1.0 1.5</size></box></geometry></collision>
+        <collision name="c"><geometry><box><size>1.2 1.0 3.5</size></box></geometry></collision>
         <visual name="v">
-          <geometry><box><size>1.2 1.0 1.5</size></box></geometry>
+          <geometry><box><size>1.2 1.0 3.5</size></box></geometry>
           <material><script><uri>file://media/materials/scripts/gazebo.material</uri><name>Gazebo/Blue</name></script></material>
         </visual>
       </link>

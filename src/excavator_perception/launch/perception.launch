@@ -22,9 +22,10 @@
   <!-- 激光雷达处理节点 -->
   <node name="lidar_processor" pkg="excavator_perception"
         type="lidar_processor.py" output="screen" respawn="true">
-    <param name="num_sectors" value="8"/>
-    <param name="min_range"   value="0.1"/>
+    <param name="min_range"   value="2.5"/>
     <param name="max_range"   value="20.0"/>
+    <param name="cluster_break_threshold" value="0.5"/>
+    <param name="min_cluster_points"      value="1"/>
   </node>
 
   <!-- 多模态融合节点 -->

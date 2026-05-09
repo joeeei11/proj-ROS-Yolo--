@@ -67,22 +67,27 @@ class DeepSortTrackerNode:
         h, w = frame.shape[:2]
 
         for obs in det_msg.obstacles:
-            # obs.pose.position.x/y 是归一化像素中心坐标（yolov5_detector 写入）
-            # obs.pose.pose.position.z 存储的是 confidence
-            cx_n = obs.pose.pose.position.x
-            cy_n = obs.pose.pose.position.y
             conf = obs.pose.pose.position.z
 
-            # 从归一化中心反推一个近似 bbox（仅用于 ReID 裁剪，宽高取 10% 图像尺寸）
-            # 注意：更精确的方案是 detector 直接发布像素坐标；此处为简化占位
-            bw = int(w * 0.1)
-            bh = int(h * 0.1)
-            cx = int(cx_n * w)
-            cy = int(cy_n * h)
-            x1 = max(0, cx - bw // 2)
-            y1 = max(0, cy - bh // 2)
-            x2 = min(w, cx + bw // 2)
-            y2 = min(h, cy + bh // 2)
+            # 优先使用 yolov5_detector 写入的真实像素 bbox
+            has_real_bbox = (obs.bbox_x2 > obs.bbox_x1) and (obs.bbox_y2 > obs.bbox_y1)
+            if has_real_bbox:
+                x1 = int(max(0, obs.bbox_x1))
+                y1 = int(max(0, obs.bbox_y1))
+                x2 = int(min(w, obs.bbox_x2))
+                y2 = int(min(h, obs.bbox_y2))
+            else:
+                # Fallback：旧消息（bbox 全零）→ 按归一化中心 + 10% 估算
+                cx_n = obs.pose.pose.position.x
+                cy_n = obs.pose.pose.position.y
+                bw = int(w * 0.1)
+                bh = int(h * 0.1)
+                cx = int(cx_n * w)
+                cy = int(cy_n * h)
+                x1 = max(0, cx - bw // 2)
+                y1 = max(0, cy - bh // 2)
+                x2 = min(w, cx + bw // 2)
+                y2 = min(h, cy + bh // 2)
 
             raw_dets.append(([x1, y1, x2, y2], float(conf), obs.obstacle_type))
             obs_meta.append(obs)
@@ -113,7 +118,7 @@ class DeepSortTrackerNode:
             obs_out.obstacle_type = track.det_class or "unknown"
             obs_out.distance = 0.0      # lidar 融合节点填充
             obs_out.risk_level = 0      # risk assessor 填充
-            # 跟踪框中心（像素，归一化）
+            # 跟踪框中心（像素，归一化，向后兼容旧下游）
             ltrb = track.to_ltrb()
             cx_t = float((ltrb[0] + ltrb[2]) / 2) / w
             cy_t = float((ltrb[1] + ltrb[3]) / 2) / h
@@ -121,6 +126,13 @@ class DeepSortTrackerNode:
             obs_out.pose.pose.position.x = cx_t
             obs_out.pose.pose.position.y = cy_t
             obs_out.pose.pose.position.z = float(track.det_conf or 0.0)
+
+            # 透传真实像素 bbox（供 sensor_fusion 用相机内参 + lidar TF 投影匹配）
+            obs_out.bbox_x1 = float(max(0.0, ltrb[0]))
+            obs_out.bbox_y1 = float(max(0.0, ltrb[1]))
+            obs_out.bbox_x2 = float(min(float(w), ltrb[2]))
+            obs_out.bbox_y2 = float(min(float(h), ltrb[3]))
+
             out_msg.obstacles.append(obs_out)
 
         out_msg.dominant_risk_level = max_risk

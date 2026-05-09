@@ -72,9 +72,12 @@
       </script>
     </actor>
 
-    <!-- 车辆：从正面直线驶来，由 obstacle_spawner 控制速度 -->
-    <model name="vehicle_front">
-      <pose>15.0 0.0 0.5 0 0 3.14159</pose>
+    <!--
+      车辆：从正面直线驶来，由 obstacle_spawner 控制速度（模型名必须为 vehicle，对齐 spawner 默认参数）
+      高度从 1.5m 提升至 3.0m（中心 z=1.5m），确保激光雷达扫描面（z≈2.95m）穿过车辆。
+    -->
+    <model name="vehicle">
+      <pose>15.0 0.0 1.5 0 0 3.14159</pose>
       <link name="body">
         <inertial>
           <mass>1500.0</mass>
@@ -85,16 +88,58 @@
           </inertia>
         </inertial>
         <collision name="c">
-          <geometry><box><size>4.5 2.0 1.5</size></box></geometry>
+          <geometry><box><size>4.5 2.0 3.0</size></box></geometry>
         </collision>
         <visual name="v">
-          <geometry><box><size>4.5 2.0 1.5</size></box></geometry>
+          <geometry><box><size>4.5 2.0 3.0</size></box></geometry>
           <material>
             <script>
               <uri>file://media/materials/scripts/gazebo.material</uri>
               <name>Gazebo/Orange</name>
             </script>
           </material>
+        </visual>
+      </link>
+    </model>
+
+    <!--
+      行人物理碰撞体（actor_collider_sync.py 实时同步位置）
+      高度从 1.8m 提升至 4.0m（中心 z=2.0m），确保激光雷达扫描面（z≈2.95m）穿过碰撞体。
+    -->
+    <model name="ped_collider_0">
+      <static>false</static>
+      <pose>0.0 8.0 2.0 0 0 0</pose>
+      <link name="link">
+        <inertial>
+          <mass>1.0</mass>
+          <inertia><ixx>0.1</ixx><ixy>0</ixy><ixz>0</ixz><iyy>0.1</iyy><iyz>0</iyz><izz>0.1</izz></inertia>
+        </inertial>
+        <collision name="collision">
+          <geometry><cylinder><radius>0.3</radius><length>4.0</length></cylinder></geometry>
+        </collision>
+        <visual name="visual">
+          <geometry><cylinder><radius>0.3</radius><length>4.0</length></cylinder></geometry>
+          <material><script><uri>file://media/materials/scripts/gazebo.material</uri><name>Gazebo/Blue</name></script></material>
+          <transparency>0.7</transparency>
+        </visual>
+      </link>
+    </model>
+
+    <model name="ped_collider_1">
+      <static>false</static>
+      <pose>2.0 -8.0 2.0 0 0 0</pose>
+      <link name="link">
+        <inertial>
+          <mass>1.0</mass>
+          <inertia><ixx>0.1</ixx><ixy>0</ixy><ixz>0</ixz><iyy>0.1</iyy><iyz>0</iyz><izz>0.1</izz></inertia>
+        </inertial>
+        <collision name="collision">
+          <geometry><cylinder><radius>0.3</radius><length>4.0</length></cylinder></geometry>
+        </collision>
+        <visual name="visual">
+          <geometry><cylinder><radius>0.3</radius><length>4.0</length></cylinder></geometry>
+          <material><script><uri>file://media/materials/scripts/gazebo.material</uri><name>Gazebo/Blue</name></script></material>
+          <transparency>0.7</transparency>
         </visual>
       </link>
     </model>

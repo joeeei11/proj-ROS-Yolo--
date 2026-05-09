@@ -64,6 +64,29 @@
       </script>
     </actor>
 
+    <!--
+      行人物理碰撞体（随 actor_collider_sync.py 跟随 Actor 移动，使激光雷达能探测行人）
+      高度从 1.8m 提升至 4.0m（中心 z=2.0m），确保激光雷达扫描面（z≈2.95m）穿过碰撞体。
+    -->
+    <model name="ped_collider_0">
+      <static>false</static>
+      <pose>8.0 5.0 2.0 0 0 0</pose>
+      <link name="link">
+        <inertial>
+          <mass>1.0</mass>
+          <inertia><ixx>0.1</ixx><ixy>0</ixy><ixz>0</ixz><iyy>0.1</iyy><iyz>0</iyz><izz>0.1</izz></inertia>
+        </inertial>
+        <collision name="collision">
+          <geometry><cylinder><radius>0.3</radius><length>4.0</length></cylinder></geometry>
+        </collision>
+        <visual name="visual">
+          <geometry><cylinder><radius>0.3</radius><length>4.0</length></cylinder></geometry>
+          <material><script><uri>file://media/materials/scripts/gazebo.material</uri><name>Gazebo/Blue</name></script></material>
+          <transparency>0.7</transparency>
+        </visual>
+      </link>
+    </model>
+
     <!-- 路径标记（可视化行人通道） -->
     <model name="path_marker_start">
       <static>true</static>

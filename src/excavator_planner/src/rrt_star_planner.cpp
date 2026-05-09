@@ -264,8 +264,10 @@ RRTStarPlannerNode::RRTStarPlannerNode() : nh_("~") {
 
     obs_sub_ = nh_.subscribe("/excavator/assessed_obstacles", 10,
                               &RRTStarPlannerNode::obstacleCb, this);
+    odom_sub_ = nh_.subscribe("/odom", 10,
+                               &RRTStarPlannerNode::odomCb, this);
     path_pub_    = nh_.advertise<nav_msgs::Path>("/planned_path", 10, true);
-    cmd_vel_pub_ = nh_.advertise<geometry_msgs::Twist>("/cmd_vel", 10);
+    cmd_vel_pub_ = nh_.advertise<geometry_msgs::Twist>("/excavator/planned_cmd_vel", 10);
 
     planning_timer_  = nh_.createTimer(ros::Duration(planning_period_),
                                         &RRTStarPlannerNode::planningTimerCb, this);
@@ -280,11 +282,12 @@ void RRTStarPlannerNode::obstacleCb(
 {
     obstacles_.clear();
     for (const auto& obs : msg->obstacles) {
+        if (obs.world_x == 0.0f && obs.world_y == 0.0f && obs.world_z == 0.0f)
+            continue;  // 无有效世界坐标，跳过
         CircleObs co;
-        co.cx     = obs.pose.pose.position.x;
-        co.cy     = obs.pose.pose.position.y;
-        // Use distance as radius proxy (obstacle size not directly available)
-        co.radius = std::max(0.3, static_cast<double>(obs.distance) * 0.1);
+        co.cx     = static_cast<double>(obs.world_x);
+        co.cy     = static_cast<double>(obs.world_y);
+        co.radius = 1.0;  // 固定 1m 安全圆，足够覆盖行人/车辆
         obstacles_.push_back(co);
     }
 }
@@ -318,8 +321,27 @@ void RRTStarPlannerNode::planningTimerCb(const ros::TimerEvent&) {
              path_msg.poses.size());
 }
 
+void RRTStarPlannerNode::odomCb(const nav_msgs::Odometry::ConstPtr& msg) {
+    current_pos_.x = msg->pose.pose.position.x;
+    current_pos_.y = msg->pose.pose.position.y;
+    const auto& q  = msg->pose.pose.orientation;
+    double siny    = 2.0 * (q.w * q.z + q.x * q.y);
+    double cosy    = 1.0 - 2.0 * (q.y * q.y + q.z * q.z);
+    current_yaw_   = std::atan2(siny, cosy);
+    odom_received_ = true;
+}
+
 void RRTStarPlannerNode::followingTimerCb(const ros::TimerEvent&) {
-    if (current_path_.empty()) return;
+    if (!odom_received_ || current_path_.empty()) return;
+
+    // Check goal reached first
+    double d_goal = std::hypot(current_pos_.x - goal_.x, current_pos_.y - goal_.y);
+    if (d_goal < params_.goal_radius) {
+        ROS_INFO("RRTStar: goal reached! (dist=%.3f)", d_goal);
+        current_path_.clear();
+        cmd_vel_pub_.publish(geometry_msgs::Twist());  // 零速通知 FSM 停止前进
+        return;
+    }
 
     // Find look-ahead point on path
     while (path_idx_ + 1 < current_path_.size()) {
@@ -344,20 +366,6 @@ void RRTStarPlannerNode::followingTimerCb(const ros::TimerEvent&) {
     cmd.linear.x  = nominal_speed_;
     cmd.angular.z = std::max(-1.0, std::min(1.0, 2.0 * angle_error));
     cmd_vel_pub_.publish(cmd);
-
-    // Update dead-reckoned position
-    double dt = following_period_;
-    current_yaw_    += cmd.angular.z * dt;
-    current_pos_.x  += cmd.linear.x * std::cos(current_yaw_) * dt;
-    current_pos_.y  += cmd.linear.x * std::sin(current_yaw_) * dt;
-
-    // Check goal reached
-    double d_goal = std::hypot(current_pos_.x - goal_.x, current_pos_.y - goal_.y);
-    if (d_goal < params_.goal_radius) {
-        ROS_INFO("RRTStar: goal reached! (dist=%.3f)", d_goal);
-        current_path_.clear();
-        // 到达目标后停止发布 cmd_vel，交还控制权给 FSM
-    }
 }
 
 void RRTStarPlannerNode::spin() {

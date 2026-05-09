@@ -35,8 +35,28 @@ class ObstacleSpawner:
         self._vehicle_x = self._vehicle_start_x
         self._vehicle_y = self._vehicle_start_y
 
-        # Gazebo 服务
-        rospy.wait_for_service("/gazebo/set_model_state", timeout=10.0)
+        # Gazebo 服务（带重试，避免 Gazebo 启动慢于 spawner 时永久退出）
+        wait_total = rospy.get_param("~gazebo_wait_total_sec", 60.0)
+        wait_step = 5.0
+        elapsed = 0.0
+        ready = False
+        while not rospy.is_shutdown() and elapsed < wait_total:
+            try:
+                rospy.wait_for_service("/gazebo/set_model_state", timeout=wait_step)
+                ready = True
+                break
+            except rospy.ROSException:
+                elapsed += wait_step
+                rospy.logwarn(
+                    "[ObstacleSpawner] /gazebo/set_model_state 未就绪 (%.1fs/%.1fs)，继续等待...",
+                    elapsed, wait_total,
+                )
+        if not ready:
+            # 抛出异常让 launch 的 respawn 机制再起一次（避免永久退出）
+            raise rospy.ROSException(
+                "Gazebo SetModelState 超过 %.1fs 仍不可用" % wait_total
+            )
+
         self._set_model_state = rospy.ServiceProxy(
             "/gazebo/set_model_state", SetModelState
         )
@@ -145,7 +165,7 @@ class ObstacleSpawner:
         state.reference_frame = "world"
         state.pose.position.x = x
         state.pose.position.y = y
-        state.pose.position.z = 0.5
+        state.pose.position.z = 1.5  # 车辆模型中心 z=1.5m（高3.0m），覆盖激光雷达扫描面 z≈2.95m
         # 将 yaw 转为四元数（绕 Z 轴）
         state.pose.orientation.z = math.sin(yaw / 2.0)
         state.pose.orientation.w = math.cos(yaw / 2.0)

@@ -65,6 +65,15 @@ class FSMController:
             "/excavator/system_state", SystemState, queue_size=10
         )
 
+        # 来自 RRT* 的规划指令（FSM 仲裁后才转发到 /cmd_vel；FSM 是 /cmd_vel 唯一发布者）
+        # 没有规划输入时（即 last_planned_cmd 为 None）默认零速度，避免突发前进
+        self.last_planned_cmd = Twist()
+        self.last_planned_cmd_time = None
+        self.planned_cmd_timeout = rospy.get_param("~planned_cmd_timeout", 0.5)  # s
+        rospy.Subscriber(
+            "/excavator/planned_cmd_vel", Twist, self._planned_cmd_cb, queue_size=10
+        )
+
         # Subscribe to assessed_obstacles for numeric risk score
         rospy.Subscriber(
             "/excavator/assessed_obstacles",
@@ -101,6 +110,31 @@ class FSMController:
 
     def _risk_state_cb(self, msg):
         pass  # informational; transitions driven by _assessed_cb
+
+    def _planned_cmd_cb(self, msg):
+        """缓存 RRT* 最新规划指令；超时后视为陈旧并自然失效。"""
+        self.last_planned_cmd = msg
+        self.last_planned_cmd_time = rospy.Time.now()
+
+    def _planned_cmd_fresh(self):
+        if self.last_planned_cmd_time is None:
+            return False
+        return (rospy.Time.now() - self.last_planned_cmd_time).to_sec() <= self.planned_cmd_timeout
+
+    def _arbitrated_cmd(self, linear_cap):
+        """仲裁后的速度指令：取 RRT* 规划方向 + FSM 决定的线速度上限。
+        linear_cap：FSM 当前允许的最大前进线速度（米/秒，可为 0）。
+        """
+        out = Twist()
+        if not self._planned_cmd_fresh() or linear_cap <= 0.0:
+            return out  # 全零（保留 angular=0 防转向漂移）
+
+        plan = self.last_planned_cmd
+        # 线速度：受 FSM 上限钳制，且不允许后退（仅前进/停车）
+        out.linear.x = max(0.0, min(plan.linear.x, linear_cap))
+        # 角速度：直接采用规划值（FSM 不修正方向）
+        out.angular.z = plan.angular.z
+        return out
 
     # ── FSM Transition Logic ──────────────────────────────────────────────────
 
@@ -159,18 +193,17 @@ class FSMController:
     # ── State Handlers ────────────────────────────────────────────────────────
 
     def _handle_normal(self):
-        vel = self._smoothed_vel()
-        self.current_linear_vel = vel
-        cmd = Twist()
-        cmd.linear.x = vel
+        # NORMAL：以 RRT* 规划方向行驶；线速度上限为 quintic 平滑后的当前允许值
+        cap = self._smoothed_vel()
+        self.current_linear_vel = cap
+        cmd = self._arbitrated_cmd(linear_cap=cap)
         self.cmd_vel_pub.publish(cmd)
 
     def _handle_caution(self):
-        # Speed at 70% nominal; smooth deceleration via quintic polynomial
-        vel = self._smoothed_vel()
-        self.current_linear_vel = vel
-        cmd = Twist()
-        cmd.linear.x = vel
+        # CAUTION：保留 RRT* 转向，线速度额外乘 0.5 安全系数（基于 _smoothed_vel 已限到 70% nominal）
+        cap = self._smoothed_vel() * 0.5
+        self.current_linear_vel = cap
+        cmd = self._arbitrated_cmd(linear_cap=cap)
         self.cmd_vel_pub.publish(cmd)
 
     def _handle_paused(self):
