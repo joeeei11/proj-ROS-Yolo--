@@ -10,6 +10,7 @@ import os
 import sys
 import threading
 import time
+from collections import deque
 from datetime import datetime
 
 from flask import Flask, Response, jsonify, send_from_directory
@@ -45,7 +46,7 @@ _state = {
 }
 _start_time = time.time()
 _msg_counts = {"perception": 0, "risk": 0, "fsm": 0}
-_last_perception_time = [time.time()]
+_perception_timestamps = deque(maxlen=30)
 
 STATE_NAMES = {0: "NORMAL", 1: "CAUTION", 2: "PAUSED", 3: "EMERGENCY_STOP"}
 LEVEL_NAMES = {0: "LOW", 1: "MEDIUM", 2: "HIGH"}
@@ -90,9 +91,16 @@ def _start_ros():
 
         def on_obstacles(msg):
             now = time.time()
-            dt = now - _last_perception_time[0]
-            _last_perception_time[0] = now
-            fps = round(1.0 / dt, 1) if dt > 0 else 0.0
+            _perception_timestamps.append(now)
+            if len(_perception_timestamps) >= 2:
+                elapsed = _perception_timestamps[-1] - _perception_timestamps[0]
+                fps = (
+                    round((len(_perception_timestamps) - 1) / elapsed, 1)
+                    if elapsed > 0
+                    else 0.0
+                )
+            else:
+                fps = 0.0
             obs_list = []
             for o in msg.obstacles:
                 obs_list.append(
@@ -259,3 +267,8 @@ if __name__ == "__main__":
     port = int(os.environ.get("MONITOR_PORT", 8080))
     print(f"[monitor_server] 启动于 http://localhost:{port}", flush=True)
     app.run(host="0.0.0.0", port=port, threaded=True, debug=False)
+
+
+# CHANGES:
+# - Compute perception FPS from a 30-sample timestamp window instead of the
+#   instantaneous interval between the last two obstacle messages.

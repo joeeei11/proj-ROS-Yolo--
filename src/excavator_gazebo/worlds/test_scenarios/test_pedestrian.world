@@ -45,11 +45,11 @@
           </waypoint>
           <waypoint>
             <time>8.0</time>
-            <pose>2.0 0.0 0.0 0 0 -3.14</pose>
+            <pose>3.0 0.0 0.0 0 0 -3.14</pose>
           </waypoint>
           <waypoint>
             <time>11.0</time>
-            <pose>2.0 -3.0 0.0 0 0 -1.5708</pose>
+            <pose>3.0 -3.0 0.0 0 0 -1.5708</pose>
           </waypoint>
           <waypoint>
             <time>15.0</time>
@@ -79,10 +79,19 @@
         <collision name="collision">
           <geometry><cylinder><radius>0.3</radius><length>4.0</length></cylinder></geometry>
         </collision>
-        <visual name="visual">
-          <geometry><cylinder><radius>0.3</radius><length>4.0</length></cylinder></geometry>
-          <material><script><uri>file://media/materials/scripts/gazebo.material</uri><name>Gazebo/Blue</name></script></material>
-          <transparency>0.7</transparency>
+        <!--
+          Demo visual: keep the tall collision cylinder for lidar detection,
+          but render a compact human-shaped marker instead of a blue pillar.
+        -->
+        <visual name="body_visual">
+          <pose>0 0 -0.8 0 0 0</pose>
+          <geometry><cylinder><radius>0.22</radius><length>1.2</length></cylinder></geometry>
+          <material><script><uri>file://media/materials/scripts/gazebo.material</uri><name>Gazebo/Orange</name></script></material>
+        </visual>
+        <visual name="head_visual">
+          <pose>0 0 -0.1 0 0 0</pose>
+          <geometry><sphere><radius>0.23</radius></sphere></geometry>
+          <material><script><uri>file://media/materials/scripts/gazebo.material</uri><name>Gazebo/Orange</name></script></material>
         </visual>
       </link>
     </model>

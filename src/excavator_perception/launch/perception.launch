@@ -1,7 +1,11 @@
 <launch>
+  <arg name="debug_view" default="false"/>
+  <arg name="startup_delay_sec" default="$(optenv PERCEPTION_STARTUP_DELAY 5)"/>
+
   <!-- YOLOv5 检测节点 -->
   <node name="yolov5_detector" pkg="excavator_perception"
-        type="yolov5_detector.py" output="screen" respawn="true">
+        type="yolov5_detector.py" output="screen" respawn="true"
+        launch-prefix="bash -c 'sleep $(arg startup_delay_sec) &amp;&amp; exec &quot;$@&quot;' --">
     <rosparam file="$(find excavator_perception)/config/detector_params.yaml"
               command="load"/>
     <!-- 覆盖权重路径，使用 ROS find 宏 -->
@@ -11,7 +15,8 @@
 
   <!-- DeepSort 跟踪节点 -->
   <node name="deepsort_tracker" pkg="excavator_perception"
-        type="deepsort_tracker.py" output="screen" respawn="true">
+        type="deepsort_tracker.py" output="screen" respawn="true"
+        launch-prefix="bash -c 'sleep $(arg startup_delay_sec) &amp;&amp; exec &quot;$@&quot;' --">
     <param name="max_age"           value="30"/>
     <param name="n_init"            value="3"/>
     <param name="max_iou_distance"  value="0.7"/>
@@ -21,16 +26,33 @@
 
   <!-- 激光雷达处理节点 -->
   <node name="lidar_processor" pkg="excavator_perception"
-        type="lidar_processor.py" output="screen" respawn="true">
+        type="lidar_processor.py" output="screen" respawn="true"
+        launch-prefix="bash -c 'sleep $(arg startup_delay_sec) &amp;&amp; exec &quot;$@&quot;' --">
     <param name="min_range"   value="2.5"/>
     <param name="max_range"   value="20.0"/>
     <param name="cluster_break_threshold" value="0.5"/>
     <param name="min_cluster_points"      value="1"/>
+    <param name="target_frame" value="odom"/>
   </node>
 
   <!-- 多模态融合节点 -->
   <node name="sensor_fusion" pkg="excavator_perception"
-        type="sensor_fusion.py" output="screen" respawn="true">
+        type="sensor_fusion.py" output="screen" respawn="true"
+        launch-prefix="bash -c 'sleep $(arg startup_delay_sec) &amp;&amp; exec &quot;$@&quot;' --">
     <param name="angle_thresh_rad" value="0.2"/>
+    <param name="world_frame" value="odom"/>
   </node>
+
+  <node name="detection_view"
+        pkg="image_view" type="image_view"
+        args="image:=/excavator/detection_image"
+        output="screen"
+        if="$(arg debug_view)"/>
+
+  <!--
+    # CHANGES:
+    # - Added debug_view to optionally show /excavator/detection_image.
+    # - Added a configurable startup delay for perception nodes so Gazebo
+    #   publishes /clock before rospy/TF-dependent perception initialization.
+  -->
 </launch>

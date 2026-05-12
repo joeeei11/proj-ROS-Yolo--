@@ -3,8 +3,8 @@
 
 工作原理：
   1. 启动时订阅 /camera/camera_info，缓存 K 矩阵 (fx, fy, cx, cy) 与图像尺寸
-  2. 用 tf2 lookup base_footprint → camera_optical_link 变换
-  3. 对每个 lidar 聚类（来自 lidar_processor，含 base_footprint 系下的 world_x/y/z）：
+  2. 用 tf2 lookup odom → camera_optical_link 变换
+  3. 对每个 lidar 聚类（来自 lidar_processor，含 odom 系下的 world_x/y/z）：
      - 变换到 camera_optical_link 系（ROS 光学惯例 Z 朝前 X 朝右 Y 朝下）
      - 用 K 投影到像素 (u, v)
   4. 与每个视觉 track 的 bbox 做 point-in-bbox 匹配；命中则把 lidar 深度写入 obs.distance
@@ -31,7 +31,7 @@ class SensorFusionNode:
         self.camera_frame = rospy.get_param(
             "~camera_frame", "camera_optical_link")
         self.world_frame = rospy.get_param(
-            "~world_frame", "base_footprint")
+            "~world_frame", "odom")
         # 当视觉障碍物未匹配到任何 lidar 簇时使用的占位距离（米）
         self.unmatched_distance = float(rospy.get_param("~unmatched_distance", 999.0))
 
@@ -154,15 +154,31 @@ class SensorFusionNode:
             obs_fused.bbox_x2 = tobs.bbox_x2
             obs_fused.bbox_y2 = tobs.bbox_y2
 
-            # 在 bbox 内寻找投影 lidar 点；取深度最近者作为该目标的真实距离
-            best = None  # (depth, world_xyz, proj_idx)
-            for pi, p in enumerate(projected):
-                if not p["in_image"]:
-                    continue
-                if (tobs.bbox_x1 <= p["u"] <= tobs.bbox_x2 and
-                        tobs.bbox_y1 <= p["v"] <= tobs.bbox_y2):
-                    if best is None or p["depth"] < best[0]:
-                        best = (p["depth"], p["world"], p["lidar_dist"], pi)
+            # bbox 全 0 且有 world 坐标 → actor_collider_sync 位置跟踪，用世界坐标匹配
+            is_world_track = (tobs.bbox_x1 == 0.0 and tobs.bbox_y1 == 0.0 and
+                              tobs.bbox_x2 == 0.0 and tobs.bbox_y2 == 0.0 and
+                              (tobs.world_x != 0.0 or tobs.world_y != 0.0))
+
+            best = None  # (sort_key, world_xyz, lidar_dist, proj_idx)
+            if is_world_track:
+                # 世界坐标匹配：找 XY 平面最近的 lidar 聚类（阈值 1.0m）
+                for pi, p in enumerate(projected):
+                    wx, wy, _ = p["world"]
+                    if wx == 0.0 and wy == 0.0:
+                        continue
+                    dist_xy = math.sqrt((wx - tobs.world_x) ** 2 + (wy - tobs.world_y) ** 2)
+                    if dist_xy < 1.0:
+                        if best is None or p["lidar_dist"] < best[2]:
+                            best = (dist_xy, p["world"], p["lidar_dist"], pi)
+            else:
+                # 正常像素 bbox 匹配
+                for pi, p in enumerate(projected):
+                    if not p["in_image"]:
+                        continue
+                    if (tobs.bbox_x1 <= p["u"] <= tobs.bbox_x2 and
+                            tobs.bbox_y1 <= p["v"] <= tobs.bbox_y2):
+                        if best is None or p["depth"] < best[0]:
+                            best = (p["depth"], p["world"], p["lidar_dist"], pi)
 
             if best is not None:
                 _depth, (wx, wy, wz), lidar_dist, pi = best
@@ -207,13 +223,13 @@ class SensorFusionNode:
     # ------------------------------------------------------------------
 
     def _project_cluster_to_image(self, lo: ObstacleInfo):
-        """把 lidar cluster（base_footprint 系的 world_x/y/z）投影到像素。
+        """把 lidar cluster（odom 系的 world_x/y/z）投影到像素。
         失败（TF 不可用 / 点在相机后方 / 越界）返回 None。
         """
         if self._K is None:
             return None
 
-        # 优先使用 world_x/y/z（已在 lidar_processor 中变换到 base_footprint）
+        # 优先使用 world_x/y/z（已在 lidar_processor 中变换到 odom）
         # 若 world_x/y/z 全 0（旧消息），则回退到 lidar_link 系下的 pose 变换
         wx, wy, wz = lo.world_x, lo.world_y, lo.world_z
         if wx == 0.0 and wy == 0.0 and wz == 0.0:
@@ -231,7 +247,7 @@ class SensorFusionNode:
             except Exception:
                 return None
 
-        # base_footprint → camera_optical_link
+        # odom → camera_optical_link
         try:
             ps = PoseStamped()
             ps.header.frame_id = self.world_frame

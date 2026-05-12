@@ -4,13 +4,14 @@ trajectory_predictor.py
 订阅 /excavator/detected_obstacles，用卡尔曼滤波估算各障碍物速度并计算 TTC，
 发布 /excavator/predicted_obstacles（ObstacleArray，ttc 字段已更新）。
 
-状态向量: [x, y, vx, vy]  (位姿坐标来自 ObstacleInfo.pose 的 x/y 归一化像素坐标)
+状态向量: [x, y, vx, vy]  (坐标来自 ObstacleInfo.world_x/y 的 odom 米制坐标)
 观测向量: [x, y]
 """
 import math
 import rospy
 import numpy as np
 from filterpy.kalman import KalmanFilter
+from nav_msgs.msg import Odometry
 from excavator_msgs.msg import ObstacleArray, ObstacleInfo
 
 # 卡尔曼滤波器工厂：4状态(x,y,vx,vy) 2观测(x,y)
@@ -44,6 +45,8 @@ class TrajectoryPredictor:
 
         # track_id -> {kf, missing_count}
         self._trackers = {}
+        self._robot_x = 0.0
+        self._robot_y = 0.0
 
         self.sub = rospy.Subscriber(
             "/excavator/detected_obstacles", ObstacleArray, self._callback, queue_size=10
@@ -51,12 +54,17 @@ class TrajectoryPredictor:
         self.pub = rospy.Publisher(
             "/excavator/predicted_obstacles", ObstacleArray, queue_size=10
         )
+        rospy.Subscriber("/odom", Odometry, self._odom_cb, queue_size=10)
 
         rospy.on_shutdown(self._shutdown)
         rospy.loginfo("TrajectoryPredictor initialized, dt=%.2fs", self.dt)
 
     def _shutdown(self):
         rospy.loginfo("TrajectoryPredictor shutting down")
+
+    def _odom_cb(self, msg):
+        self._robot_x = msg.pose.pose.position.x
+        self._robot_y = msg.pose.pose.position.y
 
     def _get_or_create_tracker(self, obs_id, init_x, init_y):
         if obs_id not in self._trackers:
@@ -82,17 +90,19 @@ class TrajectoryPredictor:
           - 障碍物朝挖掘机靠近：投影为正 → approach_speed 增大
           - 障碍物横向通过：投影为 0 → approach_speed = excavator_speed
           - 障碍物远离：投影为负 → approach_speed 减小，可能为负
-        wx, wy 是障碍物世界坐标（base_footprint 系，米）。
+        wx, wy 是障碍物世界坐标（odom 系，米）。
         若 approach_speed <= 0 返回 -1（安全）。
         """
-        d = math.sqrt(wx * wx + wy * wy)
+        rel_x = wx - self._robot_x
+        rel_y = wy - self._robot_y
+        d = math.sqrt(rel_x * rel_x + rel_y * rel_y)
         if d < 1e-6:
             if distance <= 0.0:
                 return 0.0
             return min(distance / max(self.excavator_speed, 1e-3), 999.0)
         # 单位向量：障碍物 → 挖掘机原点
-        ux = -wx / d
-        uy = -wy / d
+        ux = -rel_x / d
+        uy = -rel_y / d
         radial = vx * ux + vy * uy  # 速度径向分量；>0 表示靠近
 
         approach = self.excavator_speed + radial
@@ -117,7 +127,7 @@ class TrajectoryPredictor:
             oid = obs.obstacle_id
             seen_ids.add(oid)
 
-            # 优先使用 sensor_fusion 写入的世界坐标（米；base_footprint 系）
+            # 优先使用 sensor_fusion 写入的世界坐标（米；odom 系）
             # 若 world_xyz 全零（视觉 track 未匹配到 lidar）则跳过卡尔曼预测，仅透传
             has_world = not (
                 obs.world_x == 0.0 and obs.world_y == 0.0 and obs.world_z == 0.0

@@ -160,7 +160,9 @@ class FSMController:
                 self._do_transition(
                     EMERGENCY_STOP, "score %.3f >= %.2f" % (score, _P2E)
                 )
-            # PAUSED -> CAUTION auto-resume is done in _handle_paused (periodic)
+            elif score < _P2C:
+                self._do_transition(CAUTION, "score %.3f < %.2f" % (score, _P2C))
+            # _handle_paused keeps the periodic auto-resume check as a fallback.
 
     def _do_transition(self, new_state, reason=""):
         old_name = STATE_NAMES[self.state]
@@ -299,3 +301,8 @@ if __name__ == "__main__":
         controller.spin()
     except rospy.ROSInterruptException:
         pass
+
+
+# CHANGES:
+# - Restore PAUSED -> CAUTION immediately when risk drops below the resume
+#   threshold, while keeping the periodic PAUSED check as a fallback.

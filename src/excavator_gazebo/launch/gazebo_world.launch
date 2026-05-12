@@ -4,6 +4,7 @@
        default="$(find excavator_gazebo)/worlds/construction_site.world"/>
   <arg name="gui"     default="false"/>
   <arg name="paused"  default="false"/>
+  <arg name="model_variant" default="ec650"/>
 
   <!-- 启动 Gazebo -->
   <include file="$(find gazebo_ros)/launch/empty_world.launch">
@@ -16,7 +17,12 @@
   <!-- 加载机器人描述到参数服务器 -->
   <param name="robot_description"
          command="$(find xacro)/xacro
-                  $(find excavator_description)/urdf/excavator.urdf.xacro"/>
+                  $(find excavator_description)/urdf/excavator.urdf.xacro"
+         if="$(eval arg('model_variant') == 'ec650')"/>
+  <param name="robot_description"
+         command="$(find xacro)/xacro
+                  $(find excavator_description)/urdf/excavator_simple.urdf.xacro"
+         if="$(eval arg('model_variant') == 'simple')"/>
 
   <!-- 在 Gazebo 中生成机器人 -->
   <node name="spawn_urdf" pkg="gazebo_ros" type="spawn_model"

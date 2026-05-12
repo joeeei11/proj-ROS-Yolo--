@@ -15,24 +15,39 @@
   <arg name="record_bag"  default="false"/>
   <arg name="rviz"        default="true"/>
   <arg name="scenario"    default="main"/>
+  <arg name="perception_startup_delay_sec" default="$(optenv PERCEPTION_STARTUP_DELAY 5)"/>
+  <arg name="model_variant" default="ec650"/>
 
   <!-- 场景参数化：根据 scenario 选择 world 文件 -->
   <arg name="world_static"     default="$(find excavator_gazebo)/worlds/test_scenarios/test_static.world"/>
   <arg name="world_pedestrian" default="$(find excavator_gazebo)/worlds/test_scenarios/test_pedestrian.world"/>
   <arg name="world_vehicle"    default="$(find excavator_gazebo)/worlds/test_scenarios/test_vehicle.world"/>
   <arg name="world_multi"      default="$(find excavator_gazebo)/worlds/test_scenarios/test_multi_threat.world"/>
+  <arg name="resolved_world" value="$(arg world_file)"
+       if="$(eval arg('scenario') == 'main')"/>
+  <arg name="resolved_world" value="$(arg world_static)"
+       if="$(eval arg('scenario') == 'static')"/>
+  <arg name="resolved_world" value="$(arg world_pedestrian)"
+       if="$(eval arg('scenario') == 'pedestrian')"/>
+  <arg name="resolved_world" value="$(arg world_vehicle)"
+       if="$(eval arg('scenario') == 'vehicle')"/>
+  <arg name="resolved_world" value="$(arg world_multi)"
+       if="$(eval arg('scenario') == 'multi_threat')"/>
 
   <!-- ===== Step 1: Gazebo 仿真世界 ===== -->
   <!-- gui 模式：headless=false 时开启 Gazebo GUI，headless=true 时仅 gzserver -->
   <include file="$(find excavator_gazebo)/launch/gazebo_world.launch">
-    <arg name="world_name" value="$(arg world_file)"/>
+    <arg name="world_name" value="$(arg resolved_world)"/>
     <arg name="gui"        value="$(eval not arg('headless'))"/>
     <arg name="paused"     value="false"/>
+    <arg name="model_variant" value="$(arg model_variant)"/>
   </include>
 
   <!-- ===== Step 2: 感知模块 ===== -->
   <!-- respawn=true：节点崩溃后自动重启，提高系统鲁棒性 -->
-  <include file="$(find excavator_perception)/launch/perception.launch"/>
+  <include file="$(find excavator_perception)/launch/perception.launch">
+    <arg name="startup_delay_sec" value="$(arg perception_startup_delay_sec)"/>
+  </include>
 
   <!-- ===== Step 3: 风险评估模块 ===== -->
   <include file="$(find excavator_risk)/launch/risk_assessment.launch"/>
@@ -125,4 +140,12 @@
     <param name="collider_z"         value="2.0"/>
   </node>
 
+  <!--
+    # CHANGES:
+    # - Resolve the Gazebo world from scenario so scenario:=static/pedestrian/
+    #   vehicle/multi_threat loads the matching test world instead of always
+    #   loading construction_site.world.
+    # - Pass a configurable perception startup delay through the top-level
+    #   launch file so /clock can settle before perception nodes initialize.
+  -->
 </launch>

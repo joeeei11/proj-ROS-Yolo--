@@ -5,7 +5,7 @@ step_size: 0.5          # RRT extension step length (m)
 max_iterations: 5000    # maximum iteration count
 goal_radius: 0.3        # goal arrival radius (m)
 rewire_radius: 2.0      # rewire search radius (m)
-obstacle_margin: 0.5    # obstacle safety inflation (m)
+obstacle_margin: 2.0    # obstacle safety inflation (m), sized for EC650 footprint
 planning_timeout: 5.0   # planning timeout (s)
 
 # Path follower

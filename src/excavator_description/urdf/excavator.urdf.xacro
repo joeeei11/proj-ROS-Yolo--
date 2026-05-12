@@ -75,12 +75,10 @@
       <xacro:box_inertia m="${track_mass}" x="${track_len}" y="${track_wid}" z="${track_hgt}"/>
     </link>
 
-    <joint name="${prefix}_track_joint" type="continuous">
+    <joint name="${prefix}_track_joint" type="fixed">
       <parent link="base_link"/>
       <child  link="${prefix}_track_link"/>
       <origin xyz="0 ${reflect * track_offset_y} ${-chassis_hgt/2 + track_hgt/2}" rpy="0 0 0"/>
-      <axis xyz="0 1 0"/>
-      <dynamics damping="0.1" friction="1.0"/>
     </joint>
 
     <gazebo reference="${prefix}_track_link">
@@ -284,25 +282,15 @@
   <!-- 传感器连杆、关节和 Gazebo 插件定义在 sensors.xacro 中 -->
   <xacro:include filename="$(find excavator_description)/urdf/sensors.xacro"/>
 
-  <!-- ===== Gazebo 插件：差速驱动 ===== -->
+  <!-- ===== Gazebo 插件：平面移动（planar_move） ===== -->
+  <!-- 方案B：替换 diff_drive，彻底绕开履带滚动物理问题（ADR-013） -->
   <gazebo>
-    <plugin name="differential_drive_controller" filename="libgazebo_ros_diff_drive.so">
-      <leftJoint>left_track_joint</leftJoint>
-      <rightJoint>right_track_joint</rightJoint>
-      <wheelSeparation>${2 * track_offset_y}</wheelSeparation>
-      <wheelDiameter>${track_hgt}</wheelDiameter>
-      <wheelTorque>20000</wheelTorque>
-      <wheelAcceleration>1.0</wheelAcceleration>
+    <plugin name="planar_move_controller" filename="libgazebo_ros_planar_move.so">
       <commandTopic>cmd_vel</commandTopic>
       <odometryTopic>odom</odometryTopic>
       <odometryFrame>odom</odometryFrame>
+      <odometryRate>20.0</odometryRate>
       <robotBaseFrame>base_footprint</robotBaseFrame>
-      <odometrySource>1</odometrySource>
-      <publishWheelTF>false</publishWheelTF>
-      <publishOdomTF>true</publishOdomTF>
-      <!-- 关闭 wheel joint state 发布；由 joint_state_publisher 统一发布全部关节，避免双写 /joint_states -->
-      <publishWheelJointState>false</publishWheelJointState>
-      <legacyMode>false</legacyMode>
     </plugin>
   </gazebo>
 

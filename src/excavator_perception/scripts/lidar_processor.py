@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""激光雷达处理节点：角度连续聚类 + TF 变换到 base_footprint，发布到 /excavator/lidar_obstacles
+"""激光雷达处理节点：角度连续聚类 + TF 变换到 odom，发布到 /excavator/lidar_obstacles
 
 每个聚类输出一个 ObstacleInfo：
   - pose.position：lidar_link 坐标系下的笛卡尔质心（米）
-  - world_x/y/z：base_footprint 坐标系下的笛卡尔质心（米）
+  - world_x/y/z：odom 坐标系下的笛卡尔质心（米）
   - distance：质心到 lidar 原点的距离（米）
 """
 
@@ -29,7 +29,7 @@ class LidarProcessorNode:
         # 聚类最小点数（过滤孤立噪声）
         self.min_cluster_points = rospy.get_param("~min_cluster_points", 2)
         # 目标坐标系
-        self.target_frame = rospy.get_param("~target_frame", "base_footprint")
+        self.target_frame = rospy.get_param("~target_frame", "odom")
 
         self.tf_buffer = tf2_ros.Buffer()
         self.tf_listener = tf2_ros.TransformListener(self.tf_buffer)
@@ -102,7 +102,7 @@ class LidarProcessorNode:
             obs.pose.pose.position.z = cz
             obs.pose.pose.orientation.w = 1.0
 
-            # 变换质心到 base_footprint 系，写入 world_x/y/z
+            # 变换质心到目标坐标系，写入 world_x/y/z
             wx, wy, wz = self._transform_to_target(msg.header.frame_id, cx, cy, cz)
             if wx is not None:
                 obs.world_x = float(wx)

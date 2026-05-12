@@ -287,7 +287,7 @@ void RRTStarPlannerNode::obstacleCb(
         CircleObs co;
         co.cx     = static_cast<double>(obs.world_x);
         co.cy     = static_cast<double>(obs.world_y);
-        co.radius = 1.0;  // 固定 1m 安全圆，足够覆盖行人/车辆
+        co.radius = 0.5;  // obstacle physical half-size (~1m box); margin handled by obstacle_margin param
         obstacles_.push_back(co);
     }
 }

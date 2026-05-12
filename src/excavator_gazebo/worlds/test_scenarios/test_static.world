@@ -33,13 +33,13 @@
     </model>
 
     <!--
-      障碍物布局（挖掘机从 x=0,y=0 出发，目标 x=15,y=0）：
-      obs_A 正前方 5m，迫使绕行
-      obs_B 前方偏右 9m，缩窄通道
-      obs_C 前方偏左 12m，形成 S 形绕行路径
+      Static obstacle layout (excavator starts at x=0,y=0; goal x=10,y=0):
+      obs_A is 5m ahead and forces a detour.
+      obs_B is moved right to y=7m to preserve EC650 clearance.
+      obs_C is moved left to y=-7m to form an S-shaped detour.
 
-      高度从 1.5m 提升至 3.5m（中心 z=1.75m），
-      确保激光雷达扫描面（z≈2.95m）穿过障碍物体积。
+      Obstacle height is 3.5m (center z=1.75m), so the lidar scan plane
+      at z~2.95m intersects the obstacle volumes.
     -->
     <model name="obstacle_A">
       <static>true</static>
@@ -55,7 +55,7 @@
 
     <model name="obstacle_B">
       <static>true</static>
-      <pose>9.0 2.5 1.75 0 0 0</pose>
+      <pose>9.0 5.0 1.75 0 0 0</pose>
       <link name="link">
         <collision name="c"><geometry><box><size>0.8 0.8 3.5</size></box></geometry></collision>
         <visual name="v">
@@ -67,7 +67,7 @@
 
     <model name="obstacle_C">
       <static>true</static>
-      <pose>12.0 -2.0 1.75 0 0 0</pose>
+      <pose>12.0 -5.0 1.75 0 0 0</pose>
       <link name="link">
         <collision name="c"><geometry><box><size>1.2 1.0 3.5</size></box></geometry></collision>
         <visual name="v">

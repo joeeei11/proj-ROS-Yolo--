@@ -1,0 +1,143 @@
+<?xml version="1.0"?>
+<robot name="excavator_simple" xmlns:xacro="http://www.ros.org/wiki/xacro">
+
+  <xacro:property name="chassis_mass" value="5000.0"/>
+  <xacro:property name="chassis_len"  value="6.0"/>
+  <xacro:property name="chassis_wid"  value="4.0"/>
+  <xacro:property name="chassis_hgt"  value="0.9"/>
+
+  <xacro:macro name="box_inertia" params="m x y z">
+    <inertial>
+      <mass value="${m}"/>
+      <inertia ixx="${m*(y*y+z*z)/12.0}" ixy="0" ixz="0"
+               iyy="${m*(x*x+z*z)/12.0}" iyz="0"
+               izz="${m*(x*x+y*y)/12.0}"/>
+    </inertial>
+  </xacro:macro>
+
+  <xacro:macro name="cylinder_inertia" params="m r h">
+    <inertial>
+      <mass value="${m}"/>
+      <inertia ixx="${m*(3*r*r+h*h)/12.0}" ixy="0" ixz="0"
+               iyy="${m*(3*r*r+h*h)/12.0}" iyz="0"
+               izz="${m*r*r/2.0}"/>
+    </inertial>
+  </xacro:macro>
+
+  <material name="excavator_yellow"><color rgba="0.95 0.72 0.08 1.0"/></material>
+  <material name="dark_gray"><color rgba="0.12 0.12 0.12 1.0"/></material>
+  <material name="steel_gray"><color rgba="0.45 0.45 0.45 1.0"/></material>
+
+  <link name="base_footprint"/>
+  <joint name="base_footprint_joint" type="fixed">
+    <parent link="base_footprint"/>
+    <child link="base_link"/>
+    <origin xyz="0 0 0.5" rpy="0 0 0"/>
+  </joint>
+
+  <link name="base_link">
+    <visual>
+      <geometry><box size="${chassis_len} ${chassis_wid} ${chassis_hgt}"/></geometry>
+      <material name="dark_gray"/>
+    </visual>
+    <collision>
+      <geometry><box size="${chassis_len} ${chassis_wid} ${chassis_hgt}"/></geometry>
+    </collision>
+    <xacro:box_inertia m="${chassis_mass}" x="${chassis_len}" y="${chassis_wid}" z="${chassis_hgt}"/>
+  </link>
+
+  <gazebo reference="base_link">
+    <material>Gazebo/DarkGray</material>
+    <mu1>1.0</mu1>
+    <mu2>1.0</mu2>
+  </gazebo>
+
+  <link name="turret_link">
+    <visual>
+      <origin xyz="-0.4 0 0" rpy="0 0 0"/>
+      <geometry><box size="3.0 2.2 0.9"/></geometry>
+      <material name="excavator_yellow"/>
+    </visual>
+    <collision>
+      <origin xyz="-0.4 0 0" rpy="0 0 0"/>
+      <geometry><box size="3.0 2.2 0.9"/></geometry>
+    </collision>
+    <xacro:box_inertia m="1800.0" x="3.0" y="2.2" z="0.9"/>
+  </link>
+  <joint name="turret_joint" type="fixed">
+    <parent link="base_link"/>
+    <child link="turret_link"/>
+    <origin xyz="0 0 0.95" rpy="0 0 0"/>
+  </joint>
+
+  <link name="boom_link">
+    <visual>
+      <origin xyz="1.6 0 0.25" rpy="0 -0.20 0"/>
+      <geometry><box size="3.4 0.32 0.32"/></geometry>
+      <material name="excavator_yellow"/>
+    </visual>
+    <xacro:box_inertia m="80.0" x="3.4" y="0.32" z="0.32"/>
+  </link>
+  <joint name="boom_joint" type="fixed">
+    <parent link="turret_link"/>
+    <child link="boom_link"/>
+    <origin xyz="1.0 0 0.35" rpy="0 0 0"/>
+  </joint>
+
+  <link name="arm_link">
+    <visual>
+      <origin xyz="1.0 0 -0.15" rpy="0 0.35 0"/>
+      <geometry><box size="2.2 0.25 0.25"/></geometry>
+      <material name="excavator_yellow"/>
+    </visual>
+    <xacro:box_inertia m="50.0" x="2.2" y="0.25" z="0.25"/>
+  </link>
+  <joint name="arm_joint" type="fixed">
+    <parent link="boom_link"/>
+    <child link="arm_link"/>
+    <origin xyz="3.2 0 0.0" rpy="0 0 0"/>
+  </joint>
+
+  <link name="bucket_link">
+    <visual>
+      <origin xyz="0.35 0 -0.25" rpy="0 0 0"/>
+      <geometry><box size="0.7 0.9 0.35"/></geometry>
+      <material name="steel_gray"/>
+    </visual>
+    <xacro:box_inertia m="40.0" x="0.7" y="0.9" z="0.35"/>
+  </link>
+  <joint name="bucket_joint" type="fixed">
+    <parent link="arm_link"/>
+    <child link="bucket_link"/>
+    <origin xyz="2.0 0 -0.1" rpy="0 0 0"/>
+  </joint>
+
+  <link name="sensor_mast_link">
+    <visual>
+      <geometry><cylinder radius="0.05" length="0.6"/></geometry>
+      <material name="dark_gray"/>
+    </visual>
+    <collision>
+      <geometry><cylinder radius="0.05" length="0.6"/></geometry>
+    </collision>
+    <xacro:cylinder_inertia m="2.0" r="0.05" h="0.6"/>
+  </link>
+  <joint name="sensor_mast_joint" type="fixed">
+    <parent link="turret_link"/>
+    <child link="sensor_mast_link"/>
+    <origin xyz="-1.0 0 1.0" rpy="0 0 0"/>
+  </joint>
+
+  <xacro:include filename="$(find excavator_description)/urdf/sensors.xacro"/>
+
+  <gazebo>
+    <plugin name="planar_move_controller" filename="libgazebo_ros_planar_move.so">
+      <commandTopic>cmd_vel</commandTopic>
+      <odometryTopic>odom</odometryTopic>
+      <odometryFrame>odom</odometryFrame>
+      <odometryRate>20.0</odometryRate>
+      <robotBaseFrame>base_footprint</robotBaseFrame>
+    </plugin>
+  </gazebo>
+
+</robot>

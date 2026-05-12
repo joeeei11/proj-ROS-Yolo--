@@ -12,7 +12,7 @@ import math
 import rospy
 from geometry_msgs.msg import Twist, Pose
 from gazebo_msgs.msg import ModelState
-from gazebo_msgs.srv import SetModelState, GetModelState
+from gazebo_msgs.srv import GetModelState, SetModelState, SpawnModel, SpawnModelRequest
 from std_srvs.srv import Trigger, TriggerResponse
 from excavator_msgs.srv import SpawnObstacle, SpawnObstacleResponse
 
@@ -25,6 +25,12 @@ class ObstacleSpawner:
         self._vehicle_speed = rospy.get_param("~vehicle_speed", 3.0)       # m/s
         self._vehicle_model = rospy.get_param("~vehicle_model", "vehicle")
         self._update_rate = rospy.get_param("~update_rate", 10.0)           # Hz
+        self._box_size_x = rospy.get_param("~box_size_x", 1.0)
+        self._box_size_y = rospy.get_param("~box_size_y", 1.0)
+        self._box_size_z = rospy.get_param("~box_size_z", 2.0)
+        self._cylinder_radius = rospy.get_param("~cylinder_radius", 0.3)
+        self._cylinder_height = rospy.get_param("~cylinder_height", 2.0)
+        self._spawned_obstacle_seq = 0
 
         # 车辆运动状态
         self._vehicle_active = False
@@ -37,31 +43,17 @@ class ObstacleSpawner:
 
         # Gazebo 服务（带重试，避免 Gazebo 启动慢于 spawner 时永久退出）
         wait_total = rospy.get_param("~gazebo_wait_total_sec", 60.0)
-        wait_step = 5.0
-        elapsed = 0.0
-        ready = False
-        while not rospy.is_shutdown() and elapsed < wait_total:
-            try:
-                rospy.wait_for_service("/gazebo/set_model_state", timeout=wait_step)
-                ready = True
-                break
-            except rospy.ROSException:
-                elapsed += wait_step
-                rospy.logwarn(
-                    "[ObstacleSpawner] /gazebo/set_model_state 未就绪 (%.1fs/%.1fs)，继续等待...",
-                    elapsed, wait_total,
-                )
-        if not ready:
-            # 抛出异常让 launch 的 respawn 机制再起一次（避免永久退出）
-            raise rospy.ROSException(
-                "Gazebo SetModelState 超过 %.1fs 仍不可用" % wait_total
-            )
+        self._wait_for_gazebo_service("/gazebo/set_model_state", wait_total)
+        self._wait_for_gazebo_service("/gazebo/spawn_sdf_model", wait_total)
 
         self._set_model_state = rospy.ServiceProxy(
             "/gazebo/set_model_state", SetModelState
         )
         self._get_model_state = rospy.ServiceProxy(
             "/gazebo/get_model_state", GetModelState
+        )
+        self._spawn_sdf_model = rospy.ServiceProxy(
+            "/gazebo/spawn_sdf_model", SpawnModel
         )
 
         # 服务：spawn_obstacle
@@ -88,33 +80,51 @@ class ObstacleSpawner:
     def _handle_spawn(self, req):
         """
         SpawnObstacle.srv：
-          string obstacle_type   # 'vehicle' | 'static'
-          float64 x
-          float64 y
-          float64 speed          # 仅 vehicle 有效
+          string obstacle_type   # 'vehicle' | 'box' | 'cylinder'
+          geometry_msgs/Pose pose
         """
         resp = SpawnObstacleResponse()
+        log_message = ""
         try:
-            if req.obstacle_type == "vehicle":
-                self._vehicle_x = req.x
-                self._vehicle_y = req.y
-                self._vehicle_start_x = req.x
-                self._vehicle_start_y = req.y
-                if req.speed > 0:
-                    self._vehicle_speed = req.speed
+            obstacle_type = req.obstacle_type.strip().lower()
+            pose = self._request_pose(req)
+            x = pose.position.x
+            y = pose.position.y
+
+            if obstacle_type == "vehicle":
+                self._vehicle_x = x
+                self._vehicle_y = y
+                self._vehicle_start_x = x
+                self._vehicle_start_y = y
+                speed = getattr(req, "speed", 0.0)
+                if speed > 0:
+                    self._vehicle_speed = speed
                 self._vehicle_active = True
-                self._teleport_vehicle(req.x, req.y)
-                resp.success = True
-                resp.message = "vehicle spawned at (%.1f, %.1f) speed=%.1f" % (
-                    req.x, req.y, self._vehicle_speed
+                self._teleport_vehicle(x, y)
+                obstacle_id = self._vehicle_model
+                log_message = "vehicle spawned at (%.1f, %.1f) speed=%.1f" % (
+                    x,
+                    y,
+                    self._vehicle_speed,
                 )
+                self._set_spawn_response(resp, True, obstacle_id, log_message)
+            elif obstacle_type in ("box", "cylinder"):
+                obstacle_id = self._spawn_static_obstacle(obstacle_type, pose, req)
+                log_message = "%s spawned as %s at (%.1f, %.1f, %.1f)" % (
+                    obstacle_type,
+                    obstacle_id,
+                    pose.position.x,
+                    pose.position.y,
+                    pose.position.z,
+                )
+                self._set_spawn_response(resp, True, obstacle_id, log_message)
             else:
-                resp.success = False
-                resp.message = "只支持 obstacle_type='vehicle'"
+                log_message = "unsupported obstacle_type='%s'" % req.obstacle_type
+                self._set_spawn_response(resp, False, "", log_message)
         except Exception as e:
-            resp.success = False
-            resp.message = str(e)
-        rospy.loginfo("[ObstacleSpawner] spawn: %s", resp.message)
+            log_message = str(e)
+            self._set_spawn_response(resp, False, "", log_message)
+        rospy.loginfo("[ObstacleSpawner] spawn: %s", log_message)
         return resp
 
     def _handle_reset(self, req):
@@ -128,6 +138,137 @@ class ObstacleSpawner:
     # ------------------------------------------------------------------
     # 运动控制循环
     # ------------------------------------------------------------------
+
+    def _wait_for_gazebo_service(self, service_name, wait_total):
+        wait_step = 5.0
+        elapsed = 0.0
+        while not rospy.is_shutdown() and elapsed < wait_total:
+            try:
+                rospy.wait_for_service(service_name, timeout=wait_step)
+                return
+            except rospy.ROSException:
+                elapsed += wait_step
+                rospy.logwarn(
+                    "[ObstacleSpawner] %s 未就绪 (%.1fs/%.1fs)，继续等待...",
+                    service_name,
+                    elapsed,
+                    wait_total,
+                )
+        raise rospy.ROSException(
+            "%s 超过 %.1fs 仍不可用" % (service_name, wait_total)
+        )
+
+    def _request_pose(self, req):
+        if hasattr(req, "pose"):
+            pose = req.pose
+            if (
+                pose.orientation.x == 0.0
+                and pose.orientation.y == 0.0
+                and pose.orientation.z == 0.0
+                and pose.orientation.w == 0.0
+            ):
+                pose.orientation.w = 1.0
+            return pose
+
+        pose = Pose()
+        pose.position.x = getattr(req, "x", 0.0)
+        pose.position.y = getattr(req, "y", 0.0)
+        pose.position.z = getattr(req, "z", 0.0)
+        pose.orientation.w = 1.0
+        return pose
+
+    def _request_scale(self, req):
+        return max(float(getattr(req, "scale", 1.0)), 0.01)
+
+    def _set_spawn_response(self, resp, success, obstacle_id, message):
+        resp.success = success
+        if hasattr(resp, "obstacle_id"):
+            resp.obstacle_id = obstacle_id
+        if hasattr(resp, "message"):
+            resp.message = message
+
+    def _next_obstacle_name(self, obstacle_type):
+        self._spawned_obstacle_seq += 1
+        return "%s_dynamic_%03d" % (obstacle_type, self._spawned_obstacle_seq)
+
+    def _spawn_static_obstacle(self, obstacle_type, pose, req):
+        scale = self._request_scale(req)
+        model_name = self._next_obstacle_name(obstacle_type)
+        spawn_pose = Pose()
+        spawn_pose.position.x = pose.position.x
+        spawn_pose.position.y = pose.position.y
+        spawn_pose.position.z = pose.position.z
+        spawn_pose.orientation = pose.orientation
+        if obstacle_type == "box":
+            model_xml = self._box_sdf(model_name, scale)
+            if spawn_pose.position.z == 0.0:
+                spawn_pose.position.z = self._box_size_z * scale / 2.0
+        else:
+            model_xml = self._cylinder_sdf(model_name, scale)
+            if spawn_pose.position.z == 0.0:
+                spawn_pose.position.z = self._cylinder_height * scale / 2.0
+
+        spawn_req = SpawnModelRequest()
+        spawn_req.model_name = model_name
+        spawn_req.model_xml = model_xml
+        spawn_req.robot_namespace = ""
+        spawn_req.initial_pose = spawn_pose
+        spawn_req.reference_frame = "world"
+        result = self._spawn_sdf_model(spawn_req)
+        if not result.success:
+            raise rospy.ServiceException(result.status_message)
+        return model_name
+
+    def _box_sdf(self, model_name, scale):
+        size_x = self._box_size_x * scale
+        size_y = self._box_size_y * scale
+        size_z = self._box_size_z * scale
+        return """<?xml version="1.0"?>
+<sdf version="1.6">
+  <model name="{name}">
+    <static>true</static>
+    <link name="link">
+      <collision name="collision">
+        <geometry>
+          <box><size>{x:.3f} {y:.3f} {z:.3f}</size></box>
+        </geometry>
+      </collision>
+      <visual name="visual">
+        <geometry>
+          <box><size>{x:.3f} {y:.3f} {z:.3f}</size></box>
+        </geometry>
+      </visual>
+    </link>
+  </model>
+</sdf>""".format(name=model_name, x=size_x, y=size_y, z=size_z)
+
+    def _cylinder_sdf(self, model_name, scale):
+        radius = self._cylinder_radius * scale
+        height = self._cylinder_height * scale
+        return """<?xml version="1.0"?>
+<sdf version="1.6">
+  <model name="{name}">
+    <static>true</static>
+    <link name="link">
+      <collision name="collision">
+        <geometry>
+          <cylinder>
+            <radius>{radius:.3f}</radius>
+            <length>{height:.3f}</length>
+          </cylinder>
+        </geometry>
+      </collision>
+      <visual name="visual">
+        <geometry>
+          <cylinder>
+            <radius>{radius:.3f}</radius>
+            <length>{height:.3f}</length>
+          </cylinder>
+        </geometry>
+      </visual>
+    </link>
+  </model>
+</sdf>""".format(name=model_name, radius=radius, height=height)
 
     def _control_loop(self, event):
         if not self._vehicle_active:
@@ -210,3 +351,10 @@ if __name__ == "__main__":
     else:
         node = ObstacleSpawner()
         node.spin()
+
+
+# CHANGES:
+# - Added /gazebo/spawn_sdf_model support for dynamic box and cylinder
+#   obstacles while preserving the existing vehicle teleport/control path.
+# - Kept compatibility with the actual SpawnObstacle.srv pose/obstacle_id
+#   fields and older x/y/z/scale/message-style callers where present.
