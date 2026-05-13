@@ -16,7 +16,7 @@
   <arg name="rviz"        default="true"/>
   <arg name="scenario"    default="main"/>
   <arg name="perception_startup_delay_sec" default="$(optenv PERCEPTION_STARTUP_DELAY 5)"/>
-  <arg name="model_variant" default="ec650"/>
+  <arg name="model_variant" default="simple"/>
 
   <!-- 场景参数化：根据 scenario 选择 world 文件 -->
   <arg name="world_static"     default="$(find excavator_gazebo)/worlds/test_scenarios/test_static.world"/>

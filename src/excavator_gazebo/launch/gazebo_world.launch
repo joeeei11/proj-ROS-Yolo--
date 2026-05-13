@@ -4,7 +4,7 @@
        default="$(find excavator_gazebo)/worlds/construction_site.world"/>
   <arg name="gui"     default="false"/>
   <arg name="paused"  default="false"/>
-  <arg name="model_variant" default="ec650"/>
+  <arg name="model_variant" default="simple"/>
 
   <!-- 启动 Gazebo -->
   <include file="$(find gazebo_ros)/launch/empty_world.launch">

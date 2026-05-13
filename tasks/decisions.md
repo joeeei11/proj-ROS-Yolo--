@@ -353,3 +353,25 @@ G3 静态绕障场景默认终点固定为 (10, 0)，路程仅 10m；obstacle_C 
 - G2 行人/车辆：非静态目标仍参与 PAUSED/EMERGENCY 判断，安全停车逻辑保留。
 
 **验证**（2026-05-13）：终止 WSL 清理旧 ROS/Gazebo 后重启 ~/start_g3_simple.sh，95 秒采样：/excavator/system_state.state=1(CAUTION)，未进入 PAUSED；/odom.pose.pose.position.x≈19.88，已接近 goal_x=20.0。
+
+## [2026-05-13] ADR-021 — 统一所有场景默认使用 simple 模型
+
+**决策**：将 `gazebo_world.launch` 和 `full_simulation.launch` 的 `model_variant` 参数默认值从 `ec650` 改为 `simple`。
+
+**修改文件**：
+- `src/excavator_gazebo/launch/gazebo_world.launch`：`model_variant` default `ec650` → `simple`
+- `src/excavator_gazebo/launch/full_simulation.launch`：`model_variant` default `ec650` → `simple`
+
+**根因**：EC650 高保真 URDF（14连杆、STL mesh collision）在 Gazebo ODE 物理引擎下与 `planar_move` 插件存在接触力冲突，导致车体 pitch/roll 偏移、翻倒，G1/G2/G3 全部场景均受影响。G3 已于 ADR-017 引入 simple 模型并验证姿态稳定（roll/pitch ≈ 0），现统一为全局默认。
+
+**影响**：EC650 文件保留，可通过 `model_variant:=ec650` 显式指定；不影响感知/评估/决策/规划任何逻辑。
+
+**关联**：`bug/g1_ec650_tipover_all_scenarios.md`，ADR-017（simple 模型设计）
+
+## [2026-05-13] ADR-022 — G2 场景切换为 test_pedestrian.world + start_g2.sh
+
+**决策**：G2 行人验证由 scenario:=main 改为 scenario:=pedestrian，新增 ~/start_g2.sh。
+
+**根因**：construction_site.world 有 8 个建材堆持续触发 lidar_cluster_*，primary_threat_id 跳变，NORMAL→EMERG 链路不清晰。test_pedestrian.world 背景零干扰，primary_threat_id 固定为 actor_pedestrian_1。
+
+**验证**（2026-05-13）：~/start_g2.sh 启动后 22s，state=EMERGENCY_STOP，primary_threat_id=actor_pedestrian_1，无任何 lidar_cluster 干扰。2D Nav Goal 功能全场景通用，G2 同样支持 RViz 自由设置终点（ADR-018 实现，rrt_star_planner.cpp:272）。
