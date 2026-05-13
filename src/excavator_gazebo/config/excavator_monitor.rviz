@@ -173,6 +173,15 @@ Visualization Manager:
       Unreliable: false
       Value: false
 
+    - Class: rviz/Marker
+      Enabled: true
+      Marker Topic: /excavator/goal_marker
+      Name: GoalMarker
+      Namespaces:
+        {}
+      Queue Size: 100
+      Value: true
+
   Enabled: true
   Global Options:
     Background Color: 48; 48; 48

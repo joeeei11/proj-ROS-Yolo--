@@ -4,6 +4,9 @@
 #include <limits>
 #include <ctime>
 
+#include <geometry_msgs/PoseStamped.h>
+#include <visualization_msgs/Marker.h>
+
 namespace excavator_planner {
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -256,7 +259,7 @@ RRTStarPlannerNode::RRTStarPlannerNode() : nh_("~") {
     nh_.param("following_period",following_period_,0.1);
 
     double gx, gy;
-    nh_.param("goal_x", gx, 10.0);
+    nh_.param("goal_x", gx, 18.0);
     nh_.param("goal_y", gy, 0.0);
     goal_ = {gx, gy};
 
@@ -266,6 +269,10 @@ RRTStarPlannerNode::RRTStarPlannerNode() : nh_("~") {
                               &RRTStarPlannerNode::obstacleCb, this);
     odom_sub_ = nh_.subscribe("/odom", 10,
                                &RRTStarPlannerNode::odomCb, this);
+    goal_sub_ = nh_.subscribe("/move_base_simple/goal", 1,
+                               &RRTStarPlannerNode::goalCb, this);
+    marker_pub_ = nh_.advertise<visualization_msgs::Marker>(
+        "/excavator/goal_marker", 1, true);
     path_pub_    = nh_.advertise<nav_msgs::Path>("/planned_path", 10, true);
     cmd_vel_pub_ = nh_.advertise<geometry_msgs::Twist>("/excavator/planned_cmd_vel", 10);
 
@@ -296,7 +303,13 @@ void RRTStarPlannerNode::planningTimerCb(const ros::TimerEvent&) {
     RRTStar planner(params_);
     planner.setObstacles(obstacles_);
 
-    auto path = planner.plan(current_pos_, goal_);
+    Point2D goal_copy;
+    {
+        std::lock_guard<std::mutex> lk(goal_mutex_);
+        goal_copy = goal_;
+    }
+
+    auto path = planner.plan(current_pos_, goal_copy);
     if (path.empty()) return;
 
     current_path_ = path;
@@ -331,11 +344,58 @@ void RRTStarPlannerNode::odomCb(const nav_msgs::Odometry::ConstPtr& msg) {
     odom_received_ = true;
 }
 
+void RRTStarPlannerNode::goalCb(
+    const geometry_msgs::PoseStamped::ConstPtr& msg)
+{
+    Point2D goal_copy;
+    {
+        std::lock_guard<std::mutex> lk(goal_mutex_);
+        goal_.x = msg->pose.position.x;
+        goal_.y = msg->pose.position.y;
+        current_path_.clear();
+        path_idx_ = 0;
+        goal_copy = goal_;
+    }
+
+    visualization_msgs::Marker marker;
+    marker.header.frame_id = fixed_frame_;
+    marker.header.stamp = ros::Time::now();
+    marker.ns = "goal_marker";
+    marker.id = 0;
+    marker.type = visualization_msgs::Marker::SPHERE;
+    marker.action = visualization_msgs::Marker::ADD;
+    marker.pose.position.x = goal_copy.x;
+    marker.pose.position.y = goal_copy.y;
+    marker.pose.position.z = 0.3;
+    marker.pose.orientation.w = 1.0;
+    marker.scale.x = 0.6;
+    marker.scale.y = 0.6;
+    marker.scale.z = 0.6;
+    marker.color.r = 1.0f;
+    marker.color.g = 0.0f;
+    marker.color.b = 0.0f;
+    marker.color.a = 1.0f;
+    marker.lifetime = ros::Duration(0);
+    marker_pub_.publish(marker);
+
+    ROS_INFO("RRTStar: new goal set to (%.2f, %.2f), replanning...",
+             goal_copy.x, goal_copy.y);
+
+    ros::TimerEvent dummy;
+    planningTimerCb(dummy);
+}
+
 void RRTStarPlannerNode::followingTimerCb(const ros::TimerEvent&) {
     if (!odom_received_ || current_path_.empty()) return;
 
     // Check goal reached first
-    double d_goal = std::hypot(current_pos_.x - goal_.x, current_pos_.y - goal_.y);
+    Point2D goal_copy;
+    {
+        std::lock_guard<std::mutex> lk(goal_mutex_);
+        goal_copy = goal_;
+    }
+    double d_goal = std::hypot(current_pos_.x - goal_copy.x,
+                              current_pos_.y - goal_copy.y);
     if (d_goal < params_.goal_radius) {
         ROS_INFO("RRTStar: goal reached! (dist=%.3f)", d_goal);
         current_path_.clear();

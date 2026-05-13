@@ -17,7 +17,7 @@ planning_period: 2.0    # re-plan interval (s)
 following_period: 0.1   # velocity command publish interval (s)
 
 # Default goal (used when no goal is set externally)
-goal_x: 10.0            # (m)
+goal_x: 20.0            # (m) expanded default goal
 goal_y: 0.0             # (m)
 
 # Frame

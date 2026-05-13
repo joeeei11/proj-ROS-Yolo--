@@ -20,7 +20,7 @@ STATE_NAMES = {
 # Double-threshold hysteresis for state transitions
 _N2C = 0.30   # NORMAL -> CAUTION entry
 _C2N = 0.20   # CAUTION -> NORMAL exit
-_C2P = 0.60   # CAUTION -> PAUSED entry
+_C2P = 0.72   # CAUTION -> PAUSED entry
 _P2C = 0.45   # PAUSED -> CAUTION exit (auto-resume)
 _P2E = 0.85   # PAUSED -> EMERGENCY_STOP entry
 
@@ -49,6 +49,7 @@ class FSMController:
 
         # Risk score updated from /excavator/assessed_obstacles
         self.current_risk_score = 0.0
+        self.current_pause_score = 0.0
 
         # Velocity smoothing state
         self.current_linear_vel = 0.0
@@ -104,8 +105,15 @@ class FSMController:
     def _assessed_cb(self, msg):
         if msg.obstacles:
             self.current_risk_score = max(obs.risk_score for obs in msg.obstacles)
+            pause_candidates = [
+                obs.risk_score
+                for obs in msg.obstacles
+                if obs.obstacle_type not in ("obstacle", "static")
+            ]
+            self.current_pause_score = max(pause_candidates) if pause_candidates else 0.0
         else:
             self.current_risk_score = 0.0
+            self.current_pause_score = 0.0
         self._evaluate_transitions()
 
     def _risk_state_cb(self, msg):
@@ -144,24 +152,25 @@ class FSMController:
             return
 
         score = self.current_risk_score
+        pause_score = self.current_pause_score
 
         if self.state == NORMAL:
             if score >= _N2C:
                 self._do_transition(CAUTION, "score %.3f >= %.2f" % (score, _N2C))
 
         elif self.state == CAUTION:
-            if score >= _C2P:
-                self._do_transition(PAUSED, "score %.3f >= %.2f" % (score, _C2P))
+            if pause_score >= _C2P:
+                self._do_transition(PAUSED, "pause_score %.3f >= %.2f" % (pause_score, _C2P))
             elif score < _C2N:
                 self._do_transition(NORMAL, "score %.3f < %.2f" % (score, _C2N))
 
         elif self.state == PAUSED:
-            if score >= _P2E:
+            if pause_score >= _P2E:
                 self._do_transition(
-                    EMERGENCY_STOP, "score %.3f >= %.2f" % (score, _P2E)
+                    EMERGENCY_STOP, "pause_score %.3f >= %.2f" % (pause_score, _P2E)
                 )
-            elif score < _P2C:
-                self._do_transition(CAUTION, "score %.3f < %.2f" % (score, _P2C))
+            elif pause_score < _P2C:
+                self._do_transition(CAUTION, "pause_score %.3f < %.2f" % (pause_score, _P2C))
             # _handle_paused keeps the periodic auto-resume check as a fallback.
 
     def _do_transition(self, new_state, reason=""):
@@ -215,10 +224,10 @@ class FSMController:
         now = rospy.Time.now()
         if (now - self.last_paused_check).to_sec() >= self.paused_check_interval:
             self.last_paused_check = now
-            if self.current_risk_score < _P2C:
+            if self.current_pause_score < _P2C:
                 rospy.loginfo(
-                    "FSM PAUSED auto-resume: score %.3f < %.2f",
-                    self.current_risk_score,
+                    "FSM PAUSED auto-resume: pause_score %.3f < %.2f",
+                    self.current_pause_score,
                     _P2C,
                 )
                 self._do_transition(CAUTION, "periodic check, risk cleared")

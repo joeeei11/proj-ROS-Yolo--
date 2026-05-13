@@ -23,7 +23,31 @@ Phase 7 目标：使真实 Gazebo 端到端仿真跑通（无消息注入）。
 ### Phase 7 验证（G）— 全部通过
 - [x] G1. headless 烟雾测试：13节点在线，/lidar/scan 10Hz，/detected_obstacles ≥1Hz ✅
 - [x] G2. pedestrian 行人场景：risk_level=2，EMERGENCY_STOP(state=3)，cmd_vel=0；resume→NORMAL ✅
-- [x] G3. static 场景：3障碍物检测(3.72m/8.19m/8.61m)，planned_path x:0→9.9m，RRT*绕障 ✅
+- [x] G3. static 场景：2026-05-12 以 simple 模型重新验证通过，`world_x/y/z=odom`，planned_path frame=odom，FSM=CAUTION ✅
+
+---
+
+## 当前状态：G3 静态场景修复 ✅ 已完成（2026-05-12）
+
+G3 在引入 EC650 高保真模型后曾出现 RRT* 持续 `no path found` 和模型翘头/姿态不稳。已按 `docs/g3_simplified_model_plan.md` 完成修复并回归通过。
+
+### 本次修复完成项
+
+- [x] 统一 `ObstacleInfo.world_x/y/z` 语义为 `odom` 全局规划坐标，避免 RRT* 将 `base_footprint` 相对坐标当作全局障碍物坐标。
+- [x] `lidar_processor` 默认/launch `target_frame=odom`，`sensor_fusion` `world_frame=odom`。
+- [x] `actor_collider_sync.py` 直接输出 actor 的 Gazebo/world 坐标，保持 G2 行人场景与 odom 语义一致。
+- [x] `trajectory_predictor.py` 订阅 `/odom`，使用障碍物 odom 坐标减机器人 odom 坐标计算距离和 TTC。
+- [x] 新增 `excavator_simple.urdf.xacro`，作为 EC650 footprint 级别的简化动力学代理模型。
+- [x] `gazebo_world.launch` / `full_simulation.launch` 增加 `model_variant:=ec650|simple`。
+- [x] 新增 `~/start_g3_simple.sh`，G3 推荐用 simple 模型启动。
+
+### 验证结果
+
+- [x] `python3 -m py_compile` 通过。
+- [x] `rosrun xacro xacro src/excavator_description/urdf/excavator_simple.urdf.xacro` 通过。
+- [x] `check_urdf /tmp/excavator_simple.urdf` 通过。
+- [x] 全量 `catkin_make -DCATKIN_WHITELIST_PACKAGES= -DCMAKE_BUILD_TYPE=Release` 通过。
+- [x] `~/start_g3_simple.sh` 回归通过：`/planned_path` 为 `odom`，FSM=`CAUTION`，risk_level=1，模型姿态稳定。
 
 ---
 

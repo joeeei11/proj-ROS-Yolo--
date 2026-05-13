@@ -25,6 +25,8 @@
 
 ## 快速开始（3 步）
 
+> **G3 当前推荐**：2026-05-12 后静态绕障请优先使用 `~/start_g3_simple.sh`，即 `model_variant:=simple` 的 EC650 footprint 简化动力学代理模型；原 `~/start_g3.sh` 保留用于 EC650 高保真模型验证。
+
 ### 第一步：克隆仓库
 
 ```bash
@@ -52,10 +54,10 @@ source ~/.bashrc
 
 ```bash
 # 启动仿真
-~/kill_all.sh && ~/start_g3.sh
+bash ~/kill_all.sh && ~/start_g3_simple.sh
 
-# 等待 45 秒启动完成，确认 13 个节点在线
-sleep 45 && rosnode list | wc -l    # 期望：13
+# 等待 45 秒启动完成，确认节点在线
+sleep 45 && rosnode list
 
 # 传送机器人回原点（仿真启动后会自动行驶，拉回起点再观测）
 rosservice call /gazebo/set_model_state '{model_state: {model_name: excavator, pose: {position: {x: 0.0, y: 0.0, z: 0.1}, orientation: {x: 0.0, y: 0.0, z: 0.0, w: 1.0}}, twist: {linear: {x: 0.0, y: 0.0, z: 0.0}, angular: {x: 0.0, y: 0.0, z: 0.0}}, reference_frame: world}}'
@@ -64,7 +66,7 @@ rosservice call /gazebo/set_model_state '{model_state: {model_name: excavator, p
 sleep 4
 echo "=== 障碍物（期望 3 个，距离 3~10m）===" && \
   timeout 8 rostopic echo /excavator/detected_obstacles -n 1 2>/dev/null | grep -E 'obstacle_type|distance:' && \
-echo "=== 风险状态（期望 level=1，距离~3.7m）===" && \
+echo "=== 风险状态（期望 level=1，距离约 4m）===" && \
   timeout 5 rostopic echo /excavator/risk_state -n 1 2>/dev/null | grep -E 'current_level|min_distance' && \
 echo "=== FSM 状态（期望 state=1 CAUTION）===" && \
   timeout 5 rostopic echo /excavator/system_state -n 1 2>/dev/null | grep 'state:'
@@ -106,7 +108,7 @@ Gazebo 仿真世界
 |------|------|---------|
 | G1 headless 烟雾测试 | `roslaunch excavator_gazebo full_simulation.launch headless:=true rviz:=false` | ✅ 13 节点在线，lidar 10Hz |
 | G2 行人紧急停止 | `~/start_g2.sh` | ✅ 行人靠近 2.1m → EMERGENCY_STOP → resume → NORMAL |
-| G3 静态障碍物绕行 | `~/start_g3.sh` | ✅ 3 障碍物检测，RRT* 路径 0→9.9m |
+| G3 静态障碍物绕行 | `~/start_g3_simple.sh` | ✅ odom 坐标规划，RRT* 路径发布，FSM=CAUTION |
 | G4 高速车辆 | `roslaunch excavator_gazebo full_simulation.launch world_file:=$(rospack find excavator_gazebo)/worlds/test_scenarios/test_vehicle.world scenario:=vehicle rviz:=false` | 可自行验证 |
 | G5 多重威胁 | `roslaunch excavator_gazebo full_simulation.launch world_file:=$(rospack find excavator_gazebo)/worlds/test_scenarios/test_multi_threat.world scenario:=multi_threat rviz:=false` | 可自行验证 |
 

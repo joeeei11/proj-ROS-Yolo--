@@ -322,5 +322,65 @@
       </link>
     </model>
 
+    <!--
+      行人 Actor（主场景动态避障演示）
+      路径：(5.0, 8.0) → (4.0, 0.0) → (5.0, -8.0) → 返回，20s 一循环
+      最近点 (4.0, 0.0) 距挖掘机起点 (0,0) 约 4m，进入 safe_distance(5m) 触发 CAUTION/EMERGENCY_STOP
+      x≈4~5m 通道，规避锥桶 cone_1/cone_2 (x=3.0)
+    -->
+    <actor name="pedestrian_1">
+      <pose>5.0 8.0 1.0 0 0 -1.5708</pose>
+      <skin>
+        <filename>walk.dae</filename>
+        <scale>1.0</scale>
+      </skin>
+      <animation name="walking">
+        <filename>walk.dae</filename>
+        <scale>1.000000</scale>
+        <interpolate_x>true</interpolate_x>
+      </animation>
+      <script>
+        <loop>true</loop>
+        <delay_start>2.0</delay_start>
+        <auto_start>true</auto_start>
+        <trajectory id="0" type="walking">
+          <waypoint><time>0.0</time><pose>5.0  8.0  0.0 0 0 -1.5708</pose></waypoint>
+          <waypoint><time>5.0</time><pose>4.0  3.0  0.0 0 0 -1.8</pose></waypoint>
+          <waypoint><time>8.0</time><pose>4.0  0.0  0.0 0 0 -3.14</pose></waypoint>
+          <waypoint><time>11.0</time><pose>4.0 -3.0  0.0 0 0 -1.5708</pose></waypoint>
+          <waypoint><time>15.0</time><pose>5.0 -8.0  0.0 0 0 -0.5</pose></waypoint>
+          <waypoint><time>20.0</time><pose>5.0  8.0  0.0 0 0  1.5708</pose></waypoint>
+        </trajectory>
+      </script>
+    </actor>
+
+    <!--
+      行人物理碰撞体（由 actor_collider_sync.py 随 Actor 实时同步位置）
+      高度 4.0m，中心 z=2.0m，确保激光雷达扫描面（z≈2.95m）穿过碰撞体。
+    -->
+    <model name="ped_collider_0">
+      <static>false</static>
+      <pose>5.0 8.0 2.0 0 0 0</pose>
+      <link name="link">
+        <inertial>
+          <mass>1.0</mass>
+          <inertia><ixx>0.1</ixx><ixy>0</ixy><ixz>0</ixz><iyy>0.1</iyy><iyz>0</iyz><izz>0.1</izz></inertia>
+        </inertial>
+        <collision name="collision">
+          <geometry><cylinder><radius>0.3</radius><length>4.0</length></cylinder></geometry>
+        </collision>
+        <visual name="body_visual">
+          <pose>0 0 -0.8 0 0 0</pose>
+          <geometry><cylinder><radius>0.22</radius><length>1.2</length></cylinder></geometry>
+          <material><script><uri>file://media/materials/scripts/gazebo.material</uri><name>Gazebo/Orange</name></script></material>
+        </visual>
+        <visual name="head_visual">
+          <pose>0 0 -0.1 0 0 0</pose>
+          <geometry><sphere><radius>0.23</radius></sphere></geometry>
+          <material><script><uri>file://media/materials/scripts/gazebo.material</uri><name>Gazebo/Orange</name></script></material>
+        </visual>
+      </link>
+    </model>
+
   </world>
 </sdf>

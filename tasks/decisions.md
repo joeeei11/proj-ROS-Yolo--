@@ -291,8 +291,65 @@
 
 ---
 
+## [2026-05-12] G3 坐标系统一与 simple 模型验证 — ADR-016/017
+
+### ADR-016：`ObstacleInfo.world_x/y/z` 统一为 `odom` 全局坐标
+
+**问题**：G3 中 RRT* 使用 `/odom` 作为当前机器人位姿和路径规划坐标系，但 `lidar_processor.py` 曾默认将激光聚类点变换到 `base_footprint`，再写入 `ObstacleInfo.world_x/y/z`。字段名表示 world/global，实际却是机器人相对坐标，导致 RRT* 把障碍物放到机器人附近，采样树难以展开并持续出现 `RRTStar: no path found to goal`。
+
+**决策**：从 2026-05-12 起，`ObstacleInfo.world_x/y/z` 在本项目中统一表示 `odom` 全局规划坐标。`lidar_processor` 默认和 launch 参数均使用 `target_frame=odom`，`sensor_fusion` 保持 `world_frame=odom`，RRT* 可直接消费该字段。
+
+**影响**：
+- G3 静态障碍物与 RRT* 坐标系一致，`/planned_path.header.frame_id` 保持 `odom`。
+- G2 的 `actor_collider_sync.py` 改为直接发布 actor 的 Gazebo/world 坐标作为 odom 坐标，避免再次转换到 `base_footprint`。
+- `trajectory_predictor.py` 订阅 `/odom` 后，用 `obstacle_world - robot_odom` 计算相对距离、相对速度和 TTC，避免将全局坐标距离误认为机器人相对距离。
+
+### ADR-017：G3 默认使用 EC650 footprint 简化动力学代理模型
+
+**问题**：EC650 高保真 URDF 包含多连杆、mesh/collision 和复杂惯量设置，Gazebo ODE 中容易出现 pitch/roll 偏移、翘头和接触抖动。该问题与感知/规划链路是两个不同层面的风险，混在一起会掩盖 G3 的坐标系和 RRT* 验证结果。
+
+**决策**：新增 `src/excavator_description/urdf/excavator_simple.urdf.xacro`，通过 `model_variant:=simple` 启动 G3。simple 模型保留 EC650 量级 footprint 和传感器 frame/topic，但使用简单几何体和固定结构降低 Gazebo 物理不稳定性。原 EC650 模型保留，通过 `model_variant:=ec650` 用于视觉展示或后续高保真物理修复。
+
+**验证**：`xacro` 展开、`check_urdf`、全量 `catkin_make` 均通过；`~/start_g3_simple.sh` 启动后节点在线，`/planned_path` 为 `odom`，FSM 为 `CAUTION`，risk_level=1，模型姿态 roll/pitch 近似 0。
+
+**使用约束**：论文/演示中如使用 simple 模型，应表述为“EC650 footprint 简化动力学代理模型”，不要宣称已完成完整 EC650 机械臂动力学仿真。
+
+
 ## 待决策事项
 
 - [x] ~~YOLOv5 训练数据集来源~~：yolov5s.pt 占位权重满足验证，后续使用 Gazebo 合成数据微调
 - [x] ~~TensorRT 量化方案~~：GPU 延迟已满足，无需量化
 - [x] ~~Web Dashboard 通信方式~~：选定 SSE
+
+## [2026-05-11] G3 障碍物位置调整 — 适配 EC650 footprint
+**修改文件**：`src/excavator_gazebo/worlds/test_scenarios/test_static.world`（配套参数：`src/excavator_planner/config/planner_params.yaml`）
+**原因**：ADR-013 引入 Volvo EC650 后，车辆 footprint 约 4m 宽，原 G3 静态障碍物布局按小型 URDF 设计；`obstacle_margin=0.5m` 与障碍物间距不足，RRT* 规划路径贴近障碍物，Gazebo 中 EC650 碰撞几何容易与静态 box 交叠，导致 planar_move 与接触力互相作用并出现姿态振荡/翻倒。
+**具体改动**：`obstacle_margin` 从 0.5m 调整为 2.0m；`obstacle_B` 从 `(9.0, 2.5)` 外移到 `(9.0, 7.0)`；`obstacle_C` 从 `(12.0, -2.0)` 外移到 `(12.0, -7.0)`；`obstacle_A` 保持 `(5.0, 0.0)`，最近障碍物距起点 5m，满足 EC650 半宽约 2m + `obstacle_margin=2.0m` 的起点安全距离。
+
+---
+
+## [2026-05-13] ADR-018：G3 动态终点设置 — RViz 2D Nav Goal + 场景扩展
+
+### 背景
+G3 静态绕障场景默认终点固定为 (10, 0)，路程仅 10m；obstacle_C 位于 (12, -5) 已超出终点，机器人实际只需绕过 obstacle_A 即可到达终点，三障碍物 S 形演示效果不完整。答辩演示时无法灵活展示不同路径的绕障过程。
+
+### 决策
+支持运行时通过 RViz 2D
+---
+
+## [2026-05-13] ADR-020 — 修复 G3 绕障后 FSM 永久 PAUSED
+
+**决策**：将 CAUTION→PAUSED 入口阈值从 0.60 提高到 0.72，并进一步让静态障碍物只触发 NORMAL/CAUTION，不触发 PAUSED/EMERGENCY；PAUSED/EMERGENCY 保留给 person/vehicle 等动态高风险目标。
+
+**根因**：G3 静态绕障中，RRT* 合法路径会贴近静态障碍物安全边界。旧 CAUTION→PAUSED 阈值 0.60 会让正常绕障进入 PAUSED；提高到 0.72 后，真实运行仍可能因 TTC 分量出现瞬时峰值而触发 PAUSED。机器停止后静态障碍物距离不再增大，score 高于 PAUSED 退出阈值 0.45，导致永久停止。
+
+**修改文件**：
+- src/excavator_decision/config/fsm_params.yaml：新增 caution_to_paused: 0.72，其余阈值保持 0.30/0.20/0.45/0.85。
+- src/excavator_decision/scripts/fsm_controller.py：_C2P 默认值 0.60→0.72；新增 current_pause_score，只统计非静态障碍物用于 PAUSED/EMERGENCY 转换。
+- src/excavator_gazebo/config/excavator_monitor.rviz：新增 /excavator/goal_marker 的 Marker 显示，便于验证 RViz 2D Nav Goal。
+
+**影响评估**：
+- G3 静态绕障：静态障碍物可持续触发 CAUTION 降速绕行，但不会触发 PAUSED，避免永久卡死。
+- G2 行人/车辆：非静态目标仍参与 PAUSED/EMERGENCY 判断，安全停车逻辑保留。
+
+**验证**（2026-05-13）：终止 WSL 清理旧 ROS/Gazebo 后重启 ~/start_g3_simple.sh，95 秒采样：/excavator/system_state.state=1(CAUTION)，未进入 PAUSED；/odom.pose.pose.position.x≈19.88，已接近 goal_x=20.0。

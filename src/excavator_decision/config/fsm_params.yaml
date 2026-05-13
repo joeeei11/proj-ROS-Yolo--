@@ -5,3 +5,9 @@ nominal_speed: 1.0          # normal operating speed (m/s)
 max_deceleration: 0.5       # max deceleration for velocity smoothing (m/s^2)
 paused_check_interval: 5.0  # how often PAUSED state checks for auto-resume (s)
 publish_rate: 10.0          # FSM state & cmd_vel publish rate (Hz)
+# FSM risk-score hysteresis thresholds
+normal_to_caution: 0.30
+caution_to_normal: 0.20
+caution_to_paused: 0.72
+paused_to_caution: 0.45
+paused_to_emergency: 0.85

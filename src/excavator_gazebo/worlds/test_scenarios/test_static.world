@@ -14,26 +14,26 @@
 
     <!-- 围栏（高 5m，确保激光雷达 z≈2.95m 扫描面穿过围栏） -->
     <model name="fence_north">
-      <static>true</static><pose>0 15 2.5 0 0 0</pose>
+      <static>true</static><pose>6 15 2.5 0 0 0</pose>
       <link name="link">
-        <collision name="c"><geometry><box><size>30 0.2 5.0</size></box></geometry></collision>
-        <visual name="v"><geometry><box><size>30 0.2 5.0</size></box></geometry>
+        <collision name="c"><geometry><box><size>42 0.2 5.0</size></box></geometry></collision>
+        <visual name="v"><geometry><box><size>42 0.2 5.0</size></box></geometry>
           <material><script><uri>file://media/materials/scripts/gazebo.material</uri><name>Gazebo/WoodFloor</name></script></material>
         </visual>
       </link>
     </model>
     <model name="fence_south">
-      <static>true</static><pose>0 -15 2.5 0 0 0</pose>
+      <static>true</static><pose>6 -15 2.5 0 0 0</pose>
       <link name="link">
-        <collision name="c"><geometry><box><size>30 0.2 5.0</size></box></geometry></collision>
-        <visual name="v"><geometry><box><size>30 0.2 5.0</size></box></geometry>
+        <collision name="c"><geometry><box><size>42 0.2 5.0</size></box></geometry></collision>
+        <visual name="v"><geometry><box><size>42 0.2 5.0</size></box></geometry>
           <material><script><uri>file://media/materials/scripts/gazebo.material</uri><name>Gazebo/WoodFloor</name></script></material>
         </visual>
       </link>
     </model>
 
     <!--
-      Static obstacle layout (excavator starts at x=0,y=0; goal x=10,y=0):
+      Static obstacle layout (excavator starts at x=0,y=0; goal x=18,y=0):
       obs_A is 5m ahead and forces a detour.
       obs_B is moved right to y=7m to preserve EC650 clearance.
       obs_C is moved left to y=-7m to form an S-shaped detour.
@@ -55,7 +55,7 @@
 
     <model name="obstacle_B">
       <static>true</static>
-      <pose>9.0 5.0 1.75 0 0 0</pose>
+      <pose>11.0 5.0 1.75 0 0 0</pose>
       <link name="link">
         <collision name="c"><geometry><box><size>0.8 0.8 3.5</size></box></geometry></collision>
         <visual name="v">
@@ -67,7 +67,7 @@
 
     <model name="obstacle_C">
       <static>true</static>
-      <pose>12.0 -5.0 1.75 0 0 0</pose>
+      <pose>17.0 0.0 1.75 0 0 0</pose>
       <link name="link">
         <collision name="c"><geometry><box><size>1.2 1.0 3.5</size></box></geometry></collision>
         <visual name="v">

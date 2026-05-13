@@ -112,6 +112,19 @@
     <param name="gazebo_wait_total_sec" value="60.0"/>
   </node>
 
+  <!-- ===== Actor 物理碰撞同步器 - main 主场景 ===== -->
+  <node name="actor_collider_sync"
+        pkg="excavator_gazebo"
+        type="actor_collider_sync.py"
+        output="screen"
+        respawn="true"
+        respawn_delay="3.0"
+        if="$(eval arg('scenario') == 'main')">
+    <param name="actor_names_str"    value="pedestrian_1"/>
+    <param name="collider_names_str" value="ped_collider_0"/>
+    <param name="collider_z"         value="2.0"/>
+  </node>
+
   <!-- ===== Actor 物理碰撞同步器 - pedestrian 场景 ===== -->
   <node name="actor_collider_sync"
         pkg="excavator_gazebo"

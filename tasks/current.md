@@ -68,3 +68,13 @@
 1. 实车部署适配（替换 Gazebo 仿真接口为真实 ROS 驱动）
 2. 替换 yolov5s.pt 占位权重为施工场景专项训练权重
 3. Phase 8：多机协同 / 更复杂的动态障碍物场景
+
+---
+
+
+## 当前补充：G3 simple 模型回归通过（2026-05-12）
+
+已完成 G3 坐标系统一和简化模型落地。当前推荐 `~/start_g3_simple.sh` 运行静态绕障场景；该脚本使用 `model_variant:=simple`，保留 EC650 footprint 量级和传感器接口，同时规避高保真 EC650 URDF 在 Gazebo 中的翘头/接触不稳定问题。
+
+最新验证：`catkin_make`、`xacro`、`check_urdf` 均通过；G3 启动后 `/planned_path` 使用 `odom`，FSM 为 `CAUTION`，risk_level=1，模型姿态稳定。
+

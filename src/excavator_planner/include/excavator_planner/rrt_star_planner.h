@@ -5,8 +5,10 @@
 #include <random>
 #include <chrono>
 #include <string>
+#include <mutex>
 
 #include <ros/ros.h>
+#include <geometry_msgs/PoseStamped.h>
 #include <geometry_msgs/Twist.h>
 #include <nav_msgs/Path.h>
 #include <nav_msgs/Odometry.h>
@@ -87,12 +89,16 @@ public:
 private:
     void obstacleCb(const excavator_msgs::ObstacleArray::ConstPtr& msg);
     void odomCb(const nav_msgs::Odometry::ConstPtr& msg);
+    void goalCb(const geometry_msgs::PoseStamped::ConstPtr& msg);
     void planningTimerCb(const ros::TimerEvent&);
     void followingTimerCb(const ros::TimerEvent&);
 
     ros::NodeHandle nh_;
     ros::Subscriber obs_sub_;
     ros::Subscriber odom_sub_;
+    ros::Subscriber goal_sub_;
+    ros::Publisher  marker_pub_;
+    std::mutex      goal_mutex_;
     ros::Publisher  path_pub_;
     ros::Publisher  cmd_vel_pub_;
     ros::Timer      planning_timer_;
