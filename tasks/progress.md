@@ -1,29 +1,140 @@
 # 开发进度
 
-## 当前状态：Phase 7 ✅ 已完成（2026-05-09）
-Phase 7 目标：使真实 Gazebo 端到端仿真跑通（无消息注入）。
+## 当前状态：✅ G3 三大缺陷全部修复（ADR-029/030/031, 2026-05-21）
 
-### Phase 7 已完成
-- [x] A1. gazebo_world.launch 加 joint_state_publisher（TF 链完整）
-- [x] A2. test_multi_threat.world 车辆名 vehicle_front → vehicle（对齐 spawner）
-- [x] A3. obstacle_spawner 加 respawn + 容错等待
-- [x] B1. ObstacleInfo.msg 新增 7 个字段（bbox + world_xyz）
-- [x] C1. yolov5_detector.py 类别映射 + bbox 写入 + device=cpu
-- [x] C2. deepsort_tracker.py 使用真实 bbox
-- [x] C3. lidar_processor.py 角度聚类 + TF 变换 world 坐标
-- [x] C4. sensor_fusion.py 相机内参投影匹配
-- [x] C5. trajectory_predictor.py 用 world 坐标卡尔曼 + 径向速度
-- [x] D1. FSM 订阅 /excavator/planned_cmd_vel，仲裁后唯一发布 /cmd_vel
-- [x] D2. RRT* 订阅 /odom 获取真实位姿
-- [x] D3. RRT* obstacleCb 使用 world 坐标
-- [x] E1. 行人碰撞体 ped_collider 模型创建 + actor_collider_sync.py
-- [x] F1. catkin_make 0 ERROR 全量重编译
-- [x] ADR-010. 所有场景障碍物高度提升（围栏 5m，建材堆 3.5m，ped_collider 4m，车辆 3m）以覆盖激光雷达扫描面 z≈2.95m
+### ADR-031 ✅ 综合修复（2026-05-21 晚 II）
+- 用户实测发现 3 个新问题：偶发碰撞 / RViz path 不刷新 / 2D Nav Goal 偶发失效
+- 修复 1: `obstacleCb` 加 LIDAR_FACE_BIAS=0.5m 偏移修正 cluster 中心
+- 修复 2: `followingTimerCb` goal reached 时 publish 空 nav_msgs::Path
+- 修复 3: `goalCb`/`planningTimerCb` 失败时 publish 空 path 给 RViz 反馈
+- 参数：robot_radius 2.5→3.5，goal_x 22→24
+- 几何核查：排除圆=4.3m，角部到 obs 真实边界富余 0.19m ✓
+- 验证：goal reached @ 36s, dist=0.231m, 0 次 EMERGENCY_STOP ✓
+- 测试场景：发不可达 goal → 机器人按 fallback path 继续走 ✓
+- 测试场景：goal reached 后 `/planned_path` poses=0 → RViz 清除 ✓
 
-### Phase 7 验证（G）— 全部通过
-- [x] G1. headless 烟雾测试：13节点在线，/lidar/scan 10Hz，/detected_obstacles ≥1Hz ✅
-- [x] G2. pedestrian 行人场景：risk_level=2，EMERGENCY_STOP(state=3)，cmd_vel=0；resume→NORMAL ✅
-- [x] G3. static 场景：2026-05-12 以 simple 模型重新验证通过，`world_x/y/z=odom`，planned_path frame=odom，FSM=CAUTION ✅
+**已验证（WSL Gazebo + RViz, sim_time 145s+）**：
+- T2 G3 端到端：goal reached @ 38.1s, dist=0.298m ✓
+- ADR-030 修复 2D Nav Goal 失效：发不可达 goal 后机器人继续走旧路径 ✓
+- 全程 EMERGENCY_STOP 次数：0 ✓
+- 启动期偶发 no path：自愈，不阻塞 ✓
+
+### ADR-030 ✅ goalCb 不提前清旧 path（2026-05-21 晚）
+- 用户反馈：RViz 2D Nav Goal **有时失效**（机器人停滞不响应）
+- 根因：`goalCb` 在 `plan()` 前就 `current_path_.clear()`，plan 失败时 path 永久空 → 机器人零速
+- 修复：`rrt_star_planner.cpp:goalCb` 删除 `current_path_.clear()` 和 `path_idx_=0`
+- 验证：发不可达 goal 后，机器人位置从 (8.59, -1.95) → (7.18, -3.55) 持续移动 ✓
+- 双侧同步、编译、运行验证全 ✓
+
+### ADR-029 ✅ robot_radius 引入 + 方案 B 修订（2026-05-21）
+- 首发参数 (robot_radius=3.61, margin=0.5) 在 3 障碍物之字形走廊**走廊封死** ⚠️
+- 修订为 robot_radius=2.5, margin=0.3, goal_x=22.0 → 走廊宽 1.21m ✓
+- WSL Gazebo 验证：spawn (0,0) → goal (22,0) 端到端首过 32.6s（dist=0.273m）✓
+- 二次启动验证：38.1s（dist=0.298m）✓
+
+### ADR-028 ✅ 回退至 3 障碍物（2026-05-20）
+- test_static.world：3 障碍物 obs_A(5,0)/obs_B(11,5)/obs_C(17,0) ✅
+- planner_params.yaml：goal_x=20.0，obstacle_margin=2.0，lookahead=1.0 ✅
+- excavator_simple.urdf.xacro：box 碰撞恢复，turret 碰撞恢复 ✅
+- check_urdf + xmllint 全部通过 ✅
+- WSL2 + Windows 同步 ✅
+- [ ] G3 启动端到端验证
+
+### ADR-026 ✅ base_link 碰撞体改圆柱（2026-05-20）
+- `base_link` 碰撞：`box(6×4×0.9)` → `cylinder(r=2.0, h=0.9)` ✅
+- `turret_link` 碰撞体删除 ✅
+- `check_urdf` 通过，连杆树完整 ✅
+- WSL2 + Windows 备份已同步 ✅
+
+### ADR-025 ✅ lookahead_dist 2.0→1.0m（2026-05-19）
+- `planner_params.yaml` lookahead_dist 已改 ✅
+- WSL2 + Windows 备份已同步 ✅
+
+### ADR-024 ✅ G3 五障碍布局（2026-05-19/20）
+- obstacle_margin 2.0→2.5m，goal_x 20→33 ✅
+- 5 障碍物布局（obs_B/D y=10），围栏更新 ✅
+- 运行时发现 obs_B/D y=10 走廊仍窄，obs_B/D 调整为 y=10（已生效）✅
+- xmllint + 几何验证全通过 ✅
+- [ ] G3 端到端启动验证：RRT* 5 障碍绕行，机器人不再卡死（待验证）
+
+---
+
+## 历史：✅ ADR-023 完成（2026-05-19）— URDF 手臂收起姿态
+
+**Codex 已完成（Windows 备份路径）**：
+- `Subbmit_Successful/.../excavator_simple.urdf.xacro` 4 处 rpy 已改
+- XML 解析通过，bucket center x=2.94 ≤ 3.0 ✅
+
+**WSL2 验证通过**：
+- [x] 同步到 WSL2 `~/excavator_ws/src/excavator_description/urdf/excavator_simple.urdf.xacro` ✅
+- [x] `xacro` 展开 + `check_urdf` 通过，连杆树完整（7链接）✅
+- [ ] G1/G2/G3 启动冒烟验证不退化（待用户手动验证）
+
+---
+
+## 历史：✅ 操作手册 v1.2 更新完成（2026-05-13）
+
+**文件**：`docs/操作手册-v1.1-real-sim.md`（版本号内升至 v1.2）  
+**主要变更**：G1/G2/G3 三场景完整启动流程、预期现象表、可实现功能（2D Nav Goal）、FSM 四状态表（含 PAUSED）、通用操作速查
+
+---
+
+## 历史：✅ ADR-022 验证通过（2026-05-13）— G2 切换 test_pedestrian.world
+
+**结果**：`primary_threat_id=actor_pedestrian_1`，`state=EMERGENCY_STOP`，零静态障碍物干扰  
+**新增**：`~/start_g2.sh`（对应 G3 的 `start_g3_simple.sh`），2D Nav Goal 同样可用  
+**WSL2 ADR-022 已追加至 decisions.md**
+
+---
+
+## 历史：✅ ADR-021 已实施（2026-05-13）— 统一所有场景 model_variant:=simple
+
+**改动**：`gazebo_world.launch` 和 `full_simulation.launch` 的 `model_variant` 默认值 `ec650` → `simple`  
+**原因**：EC650 高保真模型在 Gazebo ODE 下翻倒，G1/G2/G3 全场景受影响；simple 模型已在 G3 验证稳定  
+**待验证**：G1/G2/G3 各场景冒烟测试无翻倒
+
+---
+
+## 历史：✅ ADR-020 验证通过（2026-05-13）— G3 全程绕障成功
+
+**结果**：G3 场景机器成功绕过 obs_A(5,0)→obs_B(11,5)→obs_C(17,0) 并到达 goal(20,0)，全程无 PAUSED。  
+**关键修复**：fsm_params.yaml CAUTION→PAUSED 阈值 0.60→0.72（ADR-020）  
+**已推送**：GitHub commit `e982413`（joeeei11/proj-ROS-Yolo--，master）
+
+---
+
+## 历史：✅ GAP-3 修复完成（2026-05-12）— construction_site.world 添加行人 Actor
+
+### 修复内容
+
+| 文件 | 改动 |
+|------|------|
+| `src/excavator_gazebo/worlds/construction_site.world` | 新增 `<actor name="pedestrian_1">` 20s 循环路径 `(5,8)→(4,0)→(5,-8)→返回`；新增 `<model name="ped_collider_0">` 高 4m 圆柱碰撞体（中心 z=2.0m） |
+| `src/excavator_gazebo/launch/full_simulation.launch` | 新增 `scenario=main` 条件下的 `actor_collider_sync` 节点（`actor_names_str=pedestrian_1, collider_names_str=ped_collider_0, collider_z=2.0`） |
+
+**验证结果**（2026-05-12 Gazebo headless `scenario:=main model_variant:=simple`）：
+- `actor_collider_sync` 节点正常启动，参数注入正确 ✅
+- `/excavator/tracked_obstacles` 以 **18.5 Hz** 发布，`obstacle_id=actor_pedestrian_1`，`obstacle_type=person` ✅
+- 行人路径坐标正确：起点 `(4.97, 8.03)` → 最近点 `(3.95, 0.12)` ✅
+- 行人靠近时 `risk_level: 1 → 2`，FSM 转入 **EMERGENCY_STOP（state=3）** ✅
+- XML 语法：两文件均通过 `xmllint --noout` ✅
+
+**意义**：满足开题报告"移动行人测试场景"要求；主场景答辩演示时可直接展示动态行人避障功能，无需切换到 test_pedestrian 场景。  
+**技术决策**：见 `tasks/decisions.md` [2026-05-12] GAP-3 修复条目。
+
+---
+
+## 当前状态：✅ G3 物理导航 bug 已修复（2026-05-11）— Codex 修复
+
+### 修复内容
+
+| 文件 | 改动 |
+|------|------|
+| `src/excavator_planner/config/planner_params.yaml` | `obstacle_margin` 0.5m → 2.0m（适配 EC650 ~4m 车宽） |
+| `src/excavator_gazebo/worlds/test_scenarios/test_static.world` | obstacle_B/C 外移至 y=±7m，起点到最近障碍物 ≥ 5m |
+
+**根因**：ADR-013 引入 EC650 后，原 obstacle_margin=0.5m 远小于车体半宽，Gazebo 中 planar_move 与接触力互博导致机体翻倒。G3 原始验证仅检查 topic 输出，未做真实物理行驶验证（见 `bug/g3_static_excavator_tipover.md`）。  
+**技术决策**：已同步写入 WSL2 `tasks/decisions.md`（[2026-05-11] G3 障碍物位置调整 — 适配 EC650 footprint）及 Windows `tasks/decisions.md`。
 
 ---
 
@@ -48,6 +159,70 @@ G3 在引入 EC650 高保真模型后曾出现 RRT* 持续 `no path found` 和�
 - [x] `check_urdf /tmp/excavator_simple.urdf` 通过。
 - [x] 全量 `catkin_make -DCATKIN_WHITELIST_PACKAGES= -DCMAKE_BUILD_TYPE=Release` 通过。
 - [x] `~/start_g3_simple.sh` 回归通过：`/planned_path` 为 `odom`，FSM=`CAUTION`，risk_level=1，模型姿态稳定。
+
+---
+
+## 历史：✅ 6 个残余 Bug 已修复（2026-05-11）— Codex 修复批次
+
+### 修复内容
+
+| Bug ID | 文件 | 修复摘要 |
+|--------|------|---------|
+| MEDIUM-01 | `fsm_controller.py` | `_evaluate_transitions()` PAUSED 分支新增即时 `score < _P2C` → CAUTION 转换，消除最多 5s 恢复盲区 |
+| MEDIUM-02 | `obstacle_spawner.py` | 新增 `box`/`cylinder` SDF 动态生成支持（`_spawn_static_obstacle` + `/gazebo/spawn_sdf_model` 代理） |
+| MINOR-03 | `monitor_server.py` | `perception_fps` 计算改用 `deque(maxlen=30)` 滑动窗口均值，替换原单帧瞬时值 |
+| MINOR-04 | `full_simulation.launch` | `scenario` 参数新增 `resolved_world` 条件映射，现在同时切换 world 文件和控制 spawner |
+| REALTIME-06 | `perception.launch` | 所有 4 个感知节点增加 `launch-prefix` 5s 延迟启动，消除 `use_sim_time` 竞争导致的初始沉默 |
+| REALTIME-09 | `perception.launch` | 新增 `debug_view` 参数，`debug_view:=true` 时自动启动 `image_view` 订阅 `/excavator/detection_image` |
+
+### bug/issues.md 同步更新
+- 6 个条目标题改为 ✅，各新增 `> **修复**` 说明块
+- 汇总表：`21 已修复 / 9 仍开放` → `27 已修复 / 3 仍开放`
+- "仍开放条目速览"：移除已修复的 6 行，保留 CRITICAL-05 / MEDIUM-03 / MEDIUM-05 共 3 条
+
+---
+
+## 历史：✅ G2 坐标系 bug 已修复（2026-05-10）— ADR-014
+
+### 修复内容
+- **文件**：`excavator_ws/src/excavator_gazebo/scripts/actor_collider_sync.py`
+- **修复**：添加 tf2_ros 监听器，在 `_sync_cb` 中用 TF2 将 Actor Gazebo 世界坐标（odom 系）变换到 `base_footprint` 系再写入 `obs.world_x/y/z`
+- **辅助修复**：`~/kill_all.sh` 增加 `pkill -9 -f "python.*excavator_ws"` 清理孤儿 ROS 节点
+- **package.xml**：新增 `tf2_ros` 和 `tf2_geometry_msgs` exec_depend 声明
+
+### G2 验证结果（2026-05-10）✅
+- 行人 `distance` = 2.55m ~ 5.5m（修复前为 999.0）✅
+- EMERGENCY_STOP 正确触发（state=3, cmd_vel.x=0.0）✅
+- 偶发 `999.0` 为 TF 瞬态失败降级，不影响系统安全性
+
+### ADR-013 ✅ 已完成（2026-05-10）：planar_move 替换，odom.x=1.90m 验证通过
+
+---
+
+## 历史：Phase 7 ✅ 已完成（2026-05-09）
+Phase 7 目标：使真实 Gazebo 端到端仿真跑通（无消息注入）。
+
+### Phase 7 已完成
+- [x] A1. gazebo_world.launch 加 joint_state_publisher（TF 链完整）
+- [x] A2. test_multi_threat.world 车辆名 vehicle_front → vehicle（对齐 spawner）
+- [x] A3. obstacle_spawner 加 respawn + 容错等待
+- [x] B1. ObstacleInfo.msg 新增 7 个字段（bbox + world_xyz）
+- [x] C1. yolov5_detector.py 类别映射 + bbox 写入 + device=cpu
+- [x] C2. deepsort_tracker.py 使用真实 bbox
+- [x] C3. lidar_processor.py 角度聚类 + TF 变换 world 坐标
+- [x] C4. sensor_fusion.py 相机内参投影匹配
+- [x] C5. trajectory_predictor.py 用 world 坐标卡尔曼 + 径向速度
+- [x] D1. FSM 订阅 /excavator/planned_cmd_vel，仲裁后唯一发布 /cmd_vel
+- [x] D2. RRT* 订阅 /odom 获取真实位姿
+- [x] D3. RRT* obstacleCb 使用 world 坐标
+- [x] E1. 行人碰撞体 ped_collider 模型创建 + actor_collider_sync.py
+- [x] F1. catkin_make 0 ERROR 全量重编译
+- [x] ADR-010. 所有场景障碍物高度提升（围栏 5m，建材堆 3.5m，ped_collider 4m，车辆 3m）以覆盖激光雷达扫描面 z≈2.95m
+
+### Phase 7 验证（G）— 全部通过
+- [x] G1. headless 烟雾测试：13节点在线，/lidar/scan 10Hz，/detected_obstacles ≥1Hz ✅
+- [x] G2. pedestrian 行人场景：risk_level=2，EMERGENCY_STOP(state=3)，cmd_vel=0；resume→NORMAL ✅
+- [x] G3. static 场景：2026-05-12 以 simple 模型重新验证通过，`world_x/y/z=odom`，planned_path frame=odom，FSM=CAUTION ✅
 
 ---
 
@@ -180,7 +355,7 @@ G3 在引入 EC650 高保真模型后曾出现 RRT* 持续 `no path found` 和�
 
 ## 阻塞问题
 
-无
+- ADR-019 G3 走廊扩宽已实施并可启动 RViz，但 2026-05-13 复测采样仍出现 `system_state=PAUSED`，`min_distance≈2.71m`，尚未满足“全程 NORMAL/CAUTION、不触发 PAUSED”的验收目标。
 
 ## 备注
 

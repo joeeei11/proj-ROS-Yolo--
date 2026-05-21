@@ -40,10 +40,10 @@
       <geometry><box size="${chassis_len} ${chassis_wid} ${chassis_hgt}"/></geometry>
       <material name="dark_gray"/>
     </visual>
-    <collision>
+      <collision>
       <geometry><box size="${chassis_len} ${chassis_wid} ${chassis_hgt}"/></geometry>
     </collision>
-    <xacro:box_inertia m="${chassis_mass}" x="${chassis_len}" y="${chassis_wid}" z="${chassis_hgt}"/>
+        <xacro:box_inertia m="${chassis_mass}" x="${chassis_len}" y="${chassis_wid}" z="${chassis_hgt}"/>
   </link>
 
   <gazebo reference="base_link">
@@ -62,7 +62,7 @@
       <origin xyz="-0.4 0 0" rpy="0 0 0"/>
       <geometry><box size="3.0 2.2 0.9"/></geometry>
     </collision>
-    <xacro:box_inertia m="1800.0" x="3.0" y="2.2" z="0.9"/>
+        <xacro:box_inertia m="1800.0" x="3.0" y="2.2" z="0.9"/>
   </link>
   <joint name="turret_joint" type="fixed">
     <parent link="base_link"/>
@@ -81,12 +81,12 @@
   <joint name="boom_joint" type="fixed">
     <parent link="turret_link"/>
     <child link="boom_link"/>
-    <origin xyz="1.0 0 0.35" rpy="0 0 0"/>
+    <origin xyz="1.0 0 0.35" rpy="0 -1.05 0"/>
   </joint>
 
   <link name="arm_link">
     <visual>
-      <origin xyz="1.0 0 -0.15" rpy="0 0.35 0"/>
+      <origin xyz="1.0 0 -0.15" rpy="0 0 0"/>
       <geometry><box size="2.2 0.25 0.25"/></geometry>
       <material name="excavator_yellow"/>
     </visual>
@@ -95,7 +95,7 @@
   <joint name="arm_joint" type="fixed">
     <parent link="boom_link"/>
     <child link="arm_link"/>
-    <origin xyz="3.2 0 0.0" rpy="0 0 0"/>
+    <origin xyz="3.2 0 0.0" rpy="0 2.62 0"/>
   </joint>
 
   <link name="bucket_link">
@@ -109,7 +109,7 @@
   <joint name="bucket_joint" type="fixed">
     <parent link="arm_link"/>
     <child link="bucket_link"/>
-    <origin xyz="2.0 0 -0.1" rpy="0 0 0"/>
+    <origin xyz="2.0 0 -0.1" rpy="0 -0.52 0"/>
   </joint>
 
   <link name="sensor_mast_link">

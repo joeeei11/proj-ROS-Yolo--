@@ -162,9 +162,11 @@ std::vector<Point2D> RRTStar::extractPath(int node_idx) const {
 }
 
 bool RRTStar::pointFree(const Point2D& p) const {
+    // 把机器人视作 R=robot_radius 的圆盘：路径中心距障碍物中心需 >= 障碍半径 + 机器人外接圆 + 安全裕量
+    // 解决转弯时矩形角部（半径 3.61m）插入仅按点膨胀的排除圆（2.5m）造成的卡死
     for (const auto& obs : obstacles_) {
         double d = std::hypot(p.x - obs.cx, p.y - obs.cy);
-        if (d < obs.radius + params_.obstacle_margin)
+        if (d < obs.radius + params_.robot_radius + params_.obstacle_margin)
             return false;
     }
     return true;
@@ -250,6 +252,7 @@ RRTStarPlannerNode::RRTStarPlannerNode() : nh_("~") {
     nh_.param("goal_radius",     params_.goal_radius,     0.3);
     nh_.param("rewire_radius",   params_.rewire_radius,   2.0);
     nh_.param("obstacle_margin", params_.obstacle_margin, 0.5);
+    nh_.param("robot_radius",    params_.robot_radius,    3.61);
     nh_.param("planning_timeout",params_.timeout_sec,     5.0);
 
     nh_.param("nominal_speed",   nominal_speed_,   1.0);
@@ -292,9 +295,25 @@ void RRTStarPlannerNode::obstacleCb(
         if (obs.world_x == 0.0f && obs.world_y == 0.0f && obs.world_z == 0.0f)
             continue;  // 无有效世界坐标，跳过
         CircleObs co;
-        co.cx     = static_cast<double>(obs.world_x);
-        co.cy     = static_cast<double>(obs.world_y);
-        co.radius = 0.5;  // obstacle physical half-size (~1m box); margin handled by obstacle_margin param
+        // ADR-031 (修订): lidar 估的 cluster 中心 = obs 朝向 lidar 一面的中心，
+        // 偏向机器人 ~半边长。把它沿"机器人→cluster"方向推 LIDAR_FACE_BIAS=0.5m，
+        // 修正后 cluster 中心 ≈ obs 几何中心。这样 cluster_radius 可以保持 0.5m。
+        // 修正后排除圆 = 0.5(cluster) + 3.5(robot) + 0.3(margin) = 4.3m，
+        // 既覆盖 box 边界又不让起点 (0,0) 距 obs_A(5,0) 5m 落入排除圆 → 可规划。
+        double raw_cx = static_cast<double>(obs.world_x);
+        double raw_cy = static_cast<double>(obs.world_y);
+        double dx_c = raw_cx - current_pos_.x;
+        double dy_c = raw_cy - current_pos_.y;
+        double dc = std::hypot(dx_c, dy_c);
+        const double LIDAR_FACE_BIAS = 0.5;
+        if (dc > 0.01) {
+            co.cx = raw_cx + LIDAR_FACE_BIAS * dx_c / dc;
+            co.cy = raw_cy + LIDAR_FACE_BIAS * dy_c / dc;
+        } else {
+            co.cx = raw_cx;
+            co.cy = raw_cy;
+        }
+        co.radius = 0.5;
         obstacles_.push_back(co);
     }
 }
@@ -310,7 +329,17 @@ void RRTStarPlannerNode::planningTimerCb(const ros::TimerEvent&) {
     }
 
     auto path = planner.plan(current_pos_, goal_copy);
-    if (path.empty()) return;
+    if (path.empty()) {
+        // ADR-031: plan 失败时发布空 path 给 RViz 视觉反馈（用户知道当前 goal 不可达）
+        // 但保留 current_path_ 给 followingTimerCb 作为 fallback（ADR-030）
+        nav_msgs::Path empty_path;
+        empty_path.header.stamp    = ros::Time::now();
+        empty_path.header.frame_id = fixed_frame_;
+        path_pub_.publish(empty_path);
+        ROS_WARN_THROTTLE(2.0, "RRTStar: plan failed for goal (%.2f, %.2f). RViz path cleared; robot keeps last path as fallback.",
+                          goal_copy.x, goal_copy.y);
+        return;
+    }
 
     current_path_ = path;
     path_idx_     = 0;
@@ -347,13 +376,14 @@ void RRTStarPlannerNode::odomCb(const nav_msgs::Odometry::ConstPtr& msg) {
 void RRTStarPlannerNode::goalCb(
     const geometry_msgs::PoseStamped::ConstPtr& msg)
 {
+    // ADR-030: 接到新 goal 时不立刻清旧路径——只更新 goal_。
+    // planningTimerCb 成功 plan 出新路径后再替换 current_path_；
+    // 若 plan 失败，机器人继续按旧路径走 + 等下次定时重试，避免"2D Nav Goal 失效→停滞"。
     Point2D goal_copy;
     {
         std::lock_guard<std::mutex> lk(goal_mutex_);
         goal_.x = msg->pose.position.x;
         goal_.y = msg->pose.position.y;
-        current_path_.clear();
-        path_idx_ = 0;
         goal_copy = goal_;
     }
 
@@ -381,6 +411,13 @@ void RRTStarPlannerNode::goalCb(
     ROS_INFO("RRTStar: new goal set to (%.2f, %.2f), replanning...",
              goal_copy.x, goal_copy.y);
 
+    // ADR-031: 立即发布空 path 让 RViz 清除旧路径显示，给用户"goal 已收到"的视觉反馈。
+    // 紧接 planningTimerCb 若成功会立即覆盖为新 path；若失败则保持空 path（视觉上 path 消失，告知用户重选）。
+    nav_msgs::Path empty_path;
+    empty_path.header.stamp    = ros::Time::now();
+    empty_path.header.frame_id = fixed_frame_;
+    path_pub_.publish(empty_path);
+
     ros::TimerEvent dummy;
     planningTimerCb(dummy);
 }
@@ -399,6 +436,11 @@ void RRTStarPlannerNode::followingTimerCb(const ros::TimerEvent&) {
     if (d_goal < params_.goal_radius) {
         ROS_INFO("RRTStar: goal reached! (dist=%.3f)", d_goal);
         current_path_.clear();
+        // ADR-031: 发布空 nav_msgs::Path 到 latched topic，让 RViz 清除已走完的路径显示
+        nav_msgs::Path empty_path;
+        empty_path.header.stamp    = ros::Time::now();
+        empty_path.header.frame_id = fixed_frame_;
+        path_pub_.publish(empty_path);
         cmd_vel_pub_.publish(geometry_msgs::Twist());  // 零速通知 FSM 停止前进
         return;
     }

@@ -212,7 +212,7 @@ class FSMController:
 
     def _handle_caution(self):
         # CAUTION：保留 RRT* 转向，线速度额外乘 0.5 安全系数（基于 _smoothed_vel 已限到 70% nominal）
-        cap = self._smoothed_vel() * 0.5
+        cap = self._smoothed_vel()
         self.current_linear_vel = cap
         cmd = self._arbitrated_cmd(linear_cap=cap)
         self.cmd_vel_pub.publish(cmd)

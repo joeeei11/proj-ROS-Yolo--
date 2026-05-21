@@ -42,6 +42,9 @@ public:
         double goal_radius{0.3};
         double rewire_radius{2.0};
         double obstacle_margin{0.5};
+        // base_link 外接圆半径，sqrt(3^2 + 2^2) = 3.606m（6m x 4m 矩形车身）
+        // 用于碰撞检测时把机器人当作 R=robot_radius 的圆盘，避免转弯时角部插入障碍
+        double robot_radius{3.61};
         double timeout_sec{5.0};
         double x_min{-25.0}, x_max{25.0};
         double y_min{-25.0}, y_max{25.0};

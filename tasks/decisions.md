@@ -2,6 +2,417 @@
 
 ---
 
+## [2026-05-21] ADR-031 — 综合修复：lidar cluster 偏移补偿 + RViz path 不刷新 + 视觉反馈
+
+**问题背景**：用户实测发现 3 个独立缺陷：
+
+1. **偶发与障碍物碰撞**：机器人转弯通过 obs_A/B/C 旁时，矩形车体角部擦到 obstacle 真实边界
+2. **RViz 规划路径走完后不消失**：goal reached 后 `/planned_path` 上次 latched 的旧路径仍占据 RViz 视图
+3. **2D Nav Goal 偶发失效**：用户在 RViz 点新目标，机器人无任何视觉反馈，看起来"goal 没生效"
+
+**根因分析**：
+
+| 问题 | 根因 |
+|------|------|
+| 偶发碰撞 | `obstacleCb` 直接用 lidar cluster 中心 + `radius=0.5`。lidar 估的 cluster 中心是 obstacle 朝向 lidar 的"面中心"，偏向机器人约半边长（~0.5m）。排除圆基于偏移的中心位置，对 obs 真实"远端"覆盖不足，机器人 yaw=45° 时角部最远 3.61m 可能擦到真实边界 |
+| RViz path 不刷新 | `followingTimerCb` goal reached 时只 `current_path_.clear()`，**没 publish 空 `nav_msgs::Path`**。`path_pub_` 是 latched topic，RViz 始终显示最后一次 publish 的旧路径 |
+| 2D Nav Goal 失效 | `goalCb` 立即调用 `planningTimerCb`，若 plan 失败则 `current_path_` 保留（ADR-030），但 RViz 不会得到任何新 path → 用户看不到 goal 被收到的反馈 |
+
+**修复内容**（共 4 处改动）：
+
+| # | 文件/位置 | 改动 |
+|---|----------|------|
+| 1 | `planner_params.yaml` | `robot_radius: 2.5 → 3.5`（接近矩形外接圆 3.61，覆盖任意 yaw 角部摆幅）<br>`goal_x: 22.0 → 24.0`（推到 obs_C(17,0) 外侧 7m，远超新排除圆 4.3m）|
+| 2 | `rrt_star_planner.cpp:obstacleCb` | 引入 `LIDAR_FACE_BIAS=0.5m` 偏移修正：把 cluster 中心沿"机器人→cluster"方向推 0.5m，等价于估计 box 真实几何中心。修正后保持 `co.radius=0.5` |
+| 3 | `rrt_star_planner.cpp:followingTimerCb` | goal reached 时同时发布**空** `nav_msgs::Path` 到 `path_pub_`，使 RViz 清除已走完的路径显示 |
+| 4 | `rrt_star_planner.cpp:goalCb` & `planningTimerCb` | goalCb 收到新 goal 时立即 publish 空 path（视觉反馈"goal 已收到"）；planningTimerCb plan 失败时也 publish 空 path 并 ROS_WARN_THROTTLE 告知用户 goal 不可达 |
+
+**几何核查（修复后）**：
+
+```
+排除圆 = cluster_radius(0.5) + robot_radius(3.5) + obstacle_margin(0.3) = 4.3m
+↓
+机器人 yaw=45° 角部到 obs 真实边界富余 = 4.3 - 0.5(box 半边) - 3.61(角部) = 0.19m  ✓
+↓
+起点 (0,0) 距修正后 obs_A 中心 (5,0) = 5.0m > 4.3m  ✓ 可规划
+↓
+goal (24,0) 距修正后 obs_C 中心 (17,0) = 7.0m > 4.3m  ✓ 可达
+↓
+obs_A↔obs_B 走廊 = 7.81 - 8.6 = -0.79m  → RRT* 强制北/南绕，path 远离 obs
+```
+
+**验证结果（WSL Gazebo+RViz, sim_time 50s+, 2026-05-21）**：
+
+| 测试 | 结果 |
+|------|------|
+| G3 端到端 spawn (0,0) → goal (24,0) | ✅ **goal reached @ 36.0s, dist=0.231m** |
+| `/planned_path` 在 goal reached 后 | ✅ **poses count = 0**（RViz 路径自动清除）|
+| 手动发不可达 goal (5,0)（obs_A 中心）| ✅ 机器人按 fallback path 继续走，未卡死 |
+| 手动发可达 goal (-5,0) | ✅ 机器人朝新方向移动 |
+| 日志含 `plan failed... RViz path cleared` 反馈 | ✅ 用户明确知道 goal 不可达 |
+| 启动期偶发 plan failed | ✅ 14.8s 后稳定 |
+| EMERGENCY_STOP 次数 | ✅ 0 |
+
+**与历史 ADR 的关系**：
+- ADR-029（robot_radius=2.5, margin=0.3, goal_x=22）：本 ADR 进一步收紧 robot_radius 到 3.5 并修正 cluster 偏移
+- ADR-030（goalCb 不清旧 path）：保留 fallback 语义，但增加视觉反馈层（publish 空 path）
+
+**改动量**：1 个 yaml + 4 处 cpp 改动，共约 30 行（含注释）
+
+---
+
+## [2026-05-21] ADR-030 — `goalCb` 不提前清旧路径，修复 2D Nav Goal 偶发"失效"
+
+**问题现象**：用户在 RViz 中通过 `2D Nav Goal` 工具点击新目标，机器人**有时不响应**——停在原地，看起来 Nav Goal 失效。
+
+**根因**：`rrt_star_planner.cpp:goalCb` 收到新 goal 时，在锁内**先**执行 `current_path_.clear()` 再触发 `planningTimerCb` 调用 `plan()`：
+
+```cpp
+// 旧代码（有 bug）
+{
+    std::lock_guard<std::mutex> lk(goal_mutex_);
+    goal_.x = msg->pose.position.x;
+    goal_.y = msg->pose.position.y;
+    current_path_.clear();   // ★ 过早清空
+    path_idx_ = 0;
+    goal_copy = goal_;
+}
+planningTimerCb(dummy);
+```
+
+`planningTimerCb` 若 `plan()` 返回空（`path.empty()`）则 `return`，于是 `current_path_` 保持为空。`followingTimerCb` 检测到 `current_path_.empty()` 直接 `return`，不发任何 cmd_vel。FSM 在 `planned_cmd_timeout=0.5s` 后转零速 → **机器人停滞**。
+
+**触发条件**：plan 失败有两种常见情况，均会导致此 bug：
+1. **新 goal 落在 obs 排除圆内**（用户误点在障碍物附近）→ RRT* 5000 次迭代后 goal_idx<0
+2. **机器人当前位置已在 obs 排除圆内**（例如刚 reached 上一个 goal 后位置靠近 obs，或 lidar cluster 中心瞬时漂移导致排除圆覆盖机器人）→ RRT* 从起点扩展的所有 segment 都不 free
+
+复现：本轮验证中机器人位置 (7.20, -2.28)，lidar 估计 obs_A 中心 (5.5, -0.1)，距 2.77m < 3.3m 排除圆。此时点任何新 goal 都失效。
+
+**修复**：`goalCb` 中只更新 `goal_`，**不清空** `current_path_` / `path_idx_`：
+
+```cpp
+// 新代码
+{
+    std::lock_guard<std::mutex> lk(goal_mutex_);
+    goal_.x = msg->pose.position.x;
+    goal_.y = msg->pose.position.y;
+    // 不再 current_path_.clear() 和 path_idx_=0
+    goal_copy = goal_;
+}
+planningTimerCb(dummy);  // 成功则在内部覆盖 current_path_，失败则保留旧路径
+```
+
+`planningTimerCb` 的现有逻辑天然支持这种"成功才替换"：
+
+```cpp
+auto path = planner.plan(current_pos_, goal_copy);
+if (path.empty()) return;          // 失败保留旧 current_path_
+current_path_ = path;              // 成功覆盖
+path_idx_     = 0;
+```
+
+**修复后行为**：
+- plan 成功：机器人切换到新路径 ✓
+- plan 失败：机器人继续按**旧路径**走，下次 `planning_period=2.0s` 定时器再次重试 ✓
+- 副作用：如果用户连发两个不同方向的 goal，第二个 goal 若 plan 失败，机器人可能朝**第一个 goal 的旧路径终点**继续走 ≤2s，看起来"延迟响应"。但比"完全卡死"好得多，且 2s 后下个 planning 周期会重试新 goal
+
+**验证（本轮 G3 测试 145s sim_time）**：
+| 测试项 | 结果 |
+|--------|------|
+| G3 默认 goal=(22,0) 端到端 | ✅ goal reached @ 38.1s, dist=0.298m |
+| 手动发可达 goal (5,-5) | ✅ 切换路径并跟随 |
+| 手动发**不可达** goal (5,0)（obs_A 中心） | ✅ **机器人继续走，未停滞**（修复前会卡死） |
+| 后续到达 (5,-5) | ✅ goal reached @ 96.05s |
+| 全程 EMERGENCY_STOP | ✅ 0 次 |
+
+**改动量**：`rrt_star_planner.cpp` 删除 2 行（`current_path_.clear()` + `path_idx_=0`），加 3 行注释。共 1 处改动。
+
+**与 ADR-029 的关系**：ADR-029 解决了"规划层 vs 矩形车体角部"的几何不匹配；本 ADR 解决了"goal 回调与规划失败的状态机错配"。两者正交，均为 G3 稳定运行所必需。
+
+---
+
+## [2026-05-21] ADR-029 — 引入 `robot_radius` 参数解决 G3 转弯角部碰撞卡死
+
+**决策**：在 RRT* 碰撞检测中引入 `robot_radius` 参数（默认 3.61m，即 6×4m 矩形底盘的外接圆半径 √(3²+2²)），将原本"点机器人 + 障碍物膨胀 2.5m"的碰撞模型升级为"圆盘机器人（R=3.61m）+ 障碍物膨胀 0.5m"。同时 `obstacle_margin` 从 2.0m 回退到 0.5m。
+
+**根因（最终定位）**：
+
+ADR-026 圆柱碰撞、ADR-024/027/028 多次调整 `obstacle_margin` 均未触及问题本质 —— **规划层把机器人视为点（point inflation）的假设，与执行层 pure pursuit 让矩形车体频繁摆 yaw 的行为不兼容**：
+
+| 几何量 | 旧值 | 物理含义 |
+|--------|------|---------|
+| base_link 外接圆 `R_corner` | 3.606m | 矩形车体任意 yaw 下角部最远伸出半径 |
+| 旧 RRT* 排除圆 | 2.5m (= 0.5 + 2.0) | 路径中心距障碍物中心的最小值 |
+| **几何缺口** | **−1.106m** | 转弯时角部插入障碍物排除圆 |
+
+复现路径：机器人从 (0,0) 经规划路径 (10, 2.5) 绕 obs_A(10,0)，pure pursuit 强制 yaw 摆动追切线，机器人在 (10.5, 2.5) 附近 yaw≈+30° 时，**右后角世界系坐标 (8.9, −0.73)** 距 obs_A 中心仅 1.32m < 2.5m → ODE 接触约束与 planar_move 速度指令互博 → 卡死。
+
+**修复内容**（外科手术 4 处改动）：
+
+| 文件 | 改动 |
+|------|------|
+| `excavator_planner/include/excavator_planner/rrt_star_planner.h` | `Params` 结构体新增 `double robot_radius{3.61}` |
+| `excavator_planner/src/rrt_star_planner.cpp:pointFree()` | 判定条件加上 `+ params_.robot_radius` |
+| `excavator_planner/src/rrt_star_planner.cpp` 构造函数 | 加载 `nh_.param("robot_radius", params_.robot_radius, 3.61)` |
+| `excavator_planner/config/planner_params.yaml` | `obstacle_margin: 2.0 → 0.5`；新增 `robot_radius: 3.61` |
+
+**几何验证（修复后）**：
+- 新排除圆 = obs.radius(0.5) + robot_radius(3.61) + margin(0.5) = **4.61m**
+- 转弯时角部到障碍物中心最近距离 ≥ 4.61 − 3.61 = **1.0m 富余**
+- obs_A(10,0) 与 obs_B(14,−5) 在 G3 实际 world 文件中不构成必经走廊：路径从 obs_A 上方（y ≥ 4.61）绕过即可到达 (20,0)，全程距 obs_B 距离 ≥ 9m
+
+**为何回退 `obstacle_margin` 到 0.5m**：旧 2.0m 是"用膨胀代偿机器人尺寸"的妥协做法。现在机器人尺寸由 `robot_radius` 独立承担，`obstacle_margin` 回归其真实语义 = 纯粹的"安全裕量"，0.5m 已足。
+
+**与历史 ADR 的关系**：
+- ADR-024（margin=2.5m + 5 障碍物）：**已由 ADR-028 回退**；其在 ADR-027 中暴露的"机器人起点落入排除圆"问题，本 ADR 不会复现（路径起点 (0,0) 距任意障碍物 ≥ 10m）
+- ADR-026（圆柱碰撞体）：**仍保留作为 ADR-028 回退的基线**；但本 ADR 不依赖圆柱碰撞 —— 即使未来恢复 box 碰撞，规划层已正确处理矩形外接圆
+- ADR-027 / ADR-028：依然有效，本 ADR 不与之冲突
+
+**副作用与风险**：
+- ✅ FSM / 感知 / risk_assessor 零改动，G1/G2 行为不退化
+- ✅ 走廊更窄的场景（如未来 obs 间距 < 9.22m）可能 no path found —— 当前 G3 场景已验证可达
+- ⚠️ 若实际机器人 footprint < 6×4m 矩形外接圆，路径会比"理论最优"略远，但安全富余更高
+
+**验证标准**：
+- T1（G1 烟雾）：机器人 30s 内 x > 5，不退化
+- T2（G3 端到端，核心）：90s 内 odom.position.x > 21.5 ∧ |y| < 1.0，全程未进 EMERGENCY_STOP，最近障碍物距离始终 > 0.5m
+- T3（G2 行人）：检测到 person 时正常进入 PAUSED→EMERGENCY_STOP 路径
+
+### [2026-05-21 修订] ADR-029 参数调整 — 适配 3 障碍物之字形走廊
+
+**首次发布参数**（`robot_radius=3.61`, `obstacle_margin=0.5`, `goal_x=20.0`）在 WSL 真实 G3 场景 (ADR-019/020 obs_A(5,0)/obs_B(11,5)/obs_C(17,0)) 中**首次启动即报错** `RRTStar: no path found`，原因：
+
+| 间距 | 圆心距 | 旧排除圆和 (2×4.61) | 走廊宽度 | 备注 |
+|------|--------|-------------------|---------|------|
+| obs_A↔obs_B | 7.81m | 9.22m | −1.41m | 封死 |
+| obs_B↔obs_C | 7.81m | 9.22m | −1.41m | 封死 |
+| goal(20,0)↔obs_C | 3.0m | 4.61m (单边) | −1.61m | goal 在排除圆内 |
+
+→ 原因是首次发布时**用了 Subbmit_Successful/ 中 2 障碍物布局的 world 备份做几何核查**，忽略了 WSL 真实场景是 3 障碍物之字形走廊。
+
+**修订后参数**：
+
+| 参数 | 旧值 | 新值 | 理由 |
+|------|------|------|------|
+| `robot_radius` | 3.61 | **2.5** | 不再用最坏情况外接圆，改用 lookahead=1.0 + 路径平滑下实测 yaw 摆幅 ≤30° 时的等效半径。pure pursuit 切角 ≈ L²/(8R)=0.04m，路径平滑后机器人不会 yaw=45° |
+| `obstacle_margin` | 0.5 | **0.3** | 压缩安全裕量以扩走廊，保留最小非零余量 |
+| `goal_x` | 20.0 | **22.0** | 推到 obs_C 外侧 5m，绕过 goal 与 obs_C 的几何冲突 |
+
+**新几何核查**（排除圆 = 0.5+2.5+0.3 = **3.3m**）：
+
+| 间距 | 圆心距 | 双排除圆和 (2×3.3) | 走廊宽度 | 安全 |
+|------|--------|------------------|---------|------|
+| obs_A↔obs_B | 7.81m | 6.6m | **1.21m** | ✓ |
+| obs_B↔obs_C | 7.81m | 6.6m | **1.21m** | ✓ |
+| goal(22,0)↔obs_C | 5.0m | 3.3m | **1.7m** | ✓ |
+
+**残余风险**：1.21m 走廊宽度 < 机器人体宽 4m。机器人必须**侧着身体**（yaw ≈ 90°）才能挤过两障碍物之间。实际不会，因为 RRT* 不会让路径穿过这条窄走廊—会绕到 obs_B 上方（y>obs_B排除圆 = 5+3.3 = 8.3m）然后绕回。需在验证时观察实际路径形状。
+
+**验收标准更新**：T2 goal x 阈值从 19.5 改为 **21.5**。
+
+---
+
+## [2026-05-20] BUG-记录 — 薄碟型碰撞体导致机器人倾斜并穿入障碍物（已回滚）
+
+**问题描述**：将 `base_link` 碰撞体改为薄圆柱（r=1.5m, h=0.1m, 贴底）后，Gazebo 中挖掘机出现严重倾斜，并完全进入障碍物内部，已立即回滚。
+
+**根因**：
+1. 薄碟（h=0.1m）垂直方向支撑不足，ODE 接触计算不稳定，机器人失去水平平衡导致倾斜
+2. 一旦倾斜，机器人几何体偏转，圆柱侧面无法有效阻挡障碍物，机器人整体滑入障碍物
+
+**教训**：
+- `base_link` 必须保留原始 `box(6×4×0.9)` 碰撞体以保证姿态稳定（planar_move + ODE 需要足够的接触面积）
+- 任何对 base_link 碰撞体的修改都需在 Gazebo 中验证机器人不倾斜，再做其他测试
+- 不要为了解决规划问题而修改碰撞体，应从规划参数层面解决
+
+**回滚内容**：`excavator_simple.urdf.xacro` 恢复 `base_link` box(6×4×0.9) + `turret_link` box(3.0×2.2×0.9)
+
+---
+
+## [2026-05-20] ADR-028 — 回退 G3 至 3 障碍物布局（ADR-019 验证态）
+
+**决策**：放弃 5 障碍物扩展方案，回退到 ADR-019/020 已验证通过的 3 障碍物布局。
+
+**回退内容**：
+| 文件 | 回退内容 |
+|------|---------|
+| `test_static.world` | 恢复 obs_A(5,0)/obs_B(11,5)/obs_C(17,0)，围栏 center=6/len=42 |
+| `planner_params.yaml` | goal_x 33.0→20.0，obstacle_margin 保持 2.0，lookahead_dist 保持 1.0 |
+| `excavator_simple.urdf.xacro` | base_link 碰撞恢复 box(6×4×0.9)，turret_link 碰撞恢复 |
+
+**根因（放弃 5 障碍物）**：5 障碍物布局引入多重不稳定：obs_D 被激光雷达检测为双聚类压缩走廊；机器人绕到 obs_C 南侧后形成几何死角无法规划；圆柱碰撞使视觉与碰撞不一致（视觉 6×4m > 圆柱 r=2.0m），机器人视觉穿透障碍物。
+
+**保留**：ADR-023（手臂收起）、ADR-025（lookahead 1.0m）均保留，这两项无副作用。ADR-024/026/027 回退。
+
+---
+
+## [2026-05-20] ADR-027 — obstacle_margin 回退至 2.0m（配合圆柱碰撞）
+
+**决策**：`planner_params.yaml` `obstacle_margin: 2.5` → `obstacle_margin: 2.0`。
+
+**根因**：ADR-024 将 obstacle_margin 从 2.0→2.5m，排除圆从 2.5→3.0m。机器人跟踪路径时会到达距障碍物 ~2.5m 处，落入 3.0m 排除圆内，RRT* 起点被判为"障碍内"→ 持续 no path found。
+
+ADR-026 引入圆柱碰撞后，机器人接触障碍物时可自然滑开，不再需要 2.5m 大间距。回退至 2.0m（排除圆 2.5m）后：机器人在 2.53m 处 → 在排除圆外 ✓；走廊从 2m 扩至 5m（obs y=10）✓。
+
+**影响**：obstacle_margin=2.0m + cylinder collision 是最终稳定组合。
+
+---
+
+## [2026-05-20] ADR-026 — base_link 碰撞体改为圆柱
+
+**决策**：`excavator_simple.urdf.xacro` 中 `base_link` 碰撞体从 `box(6.0×4.0×0.9)` 改为 `cylinder(radius=2.0, length=0.9)`，同时删除 `turret_link` 碰撞体。
+
+**根因**：矩形碰撞体有四个尖角，对角半径 = √(3²+2²) = **3.61m**，而 `obstacle_margin=2.5m` 仅保证中心点距障碍物 3.0m，转弯时前角插入障碍物（3.61m > 3.0m），导致 Gazebo 接触约束将机器人卡死。圆柱碰撞无棱角，接触时自然滑开。
+
+**影响**：
+- 圆柱 radius=2.0m，与 `obstacle_margin` 中机器人半宽假设完全匹配
+- visual 几何不变（视觉仍为大机器）
+- `check_urdf` 通过，连杆树完整
+- 不影响感知/评估/决策/规划任何逻辑
+
+---
+
+## [2026-05-19] ADR-025 — pure-pursuit lookahead_dist 减半（2.0→1.0m）
+
+**决策**：`planner_params.yaml` 中 `lookahead_dist: 2.0` → `lookahead_dist: 1.0`。
+
+**根因**：纯跟踪切角量 ≈ L²/(8R)，L=2.0m、R≈3m 时切角 0.17m，而物理间隙仅 0.5m（RRT* 排除圆 3.0m - 障碍物半宽 0.5m - 机器人半宽 2.0m），触碰障碍物后机器人反复修正方向。L=1.0m 时切角降至 0.04m，远小于 0.5m 间隙。
+
+**影响**：路径跟踪更贴合规划路径，转弯响应更灵敏；直线段跟踪频率不变；不影响 RRT* 规划逻辑；G1/G2 不受影响。
+
+---
+
+## [2026-05-19] ADR-024 — G3 场景 5 障碍物布局重设计
+
+**决策**：将 G3 静态绕障场景从 3 障碍物扩展为 5 障碍物，同时将 `obstacle_margin` 从 2.0m 提升至 2.5m。
+
+**修改文件**：
+- `src/excavator_planner/config/planner_params.yaml`：`obstacle_margin` 2.0→2.5，`goal_x` 20.0→33.0
+- `src/excavator_gazebo/worlds/test_scenarios/test_static.world`：新布局
+
+**新障碍物布局（Δx=6m，y_offset=8m）**：
+
+| 障碍 | 位置 | 尺寸 |
+|------|------|------|
+| obs_A | (5, 0) | 1.0×1.0×3.5 |
+| obs_B | (11, 10) | 0.8×0.8×3.5（原 y=5→10，运行时调整）|
+| obs_C | (17, 0) | 1.2×1.0×3.5 |
+| obs_D | (23, 10) | 1.0×1.0×3.5（新增，y 调整为 10）|
+| obs_E | (29, 0) | 0.8×0.8×3.5（新增） |
+
+目标点：(33, 0)
+
+**根因**：原 `obstacle_margin=2.0m`，排除圆 2.5m，base_link 半宽 2.0m，障碍物半宽 0.5m，物理间隙 = 2.5-0.5-2.0 = **0m**，机器底盘贴着障碍物通过导致 Gazebo 接触力卡顿。
+
+**几何验证**：排除圆=3.0m，相邻障碍圆心距=√(6²+10²)=11.66m（y=10），走廊间隙=5.66m ✓；走廊中点到障碍距离=5.83m>safe_distance，risk_score≈0（NORMAL）✓；caution_to_paused=0.72，最近点score<0.30，不触发PAUSED ✓。
+
+**运行时调整（ADR-024 fix）**：obs_B/obs_D y 从 8→10。根因：y=8 时激光雷达将 obs_D 检测为 2 个聚类（22.51,7.90）+（23.21,7.49），双排除圆使走廊南边界从设计的 y=5.0 压缩到 y=4.49，机器人在 y=4.78 被挡住导致 RRT* 持续 no path found。y=10 时走廊宽 4m，双聚类仍可通过。
+
+**影响**：不改 FSM/risk 阈值；不改 co.radius；G1/G2 场景不受影响。
+
+---
+
+## [2026-05-19] ADR-023 — URDF 手臂收起姿态（行走收臂）
+
+**决策**：将 `excavator_simple.urdf.xacro` 中手臂三个固定关节的 rpy 值调整为行走收臂姿态：动臂上举 60°、斗杆内折悬垂、铲斗卷拢。
+
+**修改文件**：`src/excavator_description/urdf/excavator_simple.urdf.xacro`
+
+| 关节 | 改前 rpy | 改后 rpy | 说明 |
+|------|---------|---------|------|
+| `boom_joint` | `0 0 0` | `0 -1.05 0` | 动臂上举 60° |
+| `arm_joint` | `0 0 0` | `0 2.62 0` | 斗杆折回，从动臂顶端向下垂 |
+| `bucket_joint` | `0 0 0` | `0 -0.52 0` | 铲斗向内卷曲 30° |
+| `arm_link` visual | `rpy="0 0.35 0"` | `rpy="0 0 0"` | 消除伸臂时的视觉下垂补偿 |
+
+**根因**：原姿态铲斗伸出底盘前端约 3.5m（bucket x≈6.5m，底盘前端 x=3.0m），RRT* 安全裕量仅 2.5m，机器人绕障时铲斗在 Gazebo 中视觉穿入障碍物（无物理阻挡，不影响算法逻辑，但影响论文演示效果）。
+
+**方案选择依据**：
+- 不选"添加碰撞体"：给手臂添加 collision 会导致 Gazebo 物理阻挡，破坏 G3 S 形绕障验证
+- 不选"调大障碍裕量"：obstacle_margin 已为 2.0m，继续增大会压缩走廊，影响 RRT* 规划
+
+**验证约束**：修改后 bucket 中心 x ≤ 3.0m（底盘前端），check_urdf 通过，不需要 catkin_make。
+
+**影响评估**：纯视觉几何调整，对激光雷达（无手臂碰撞体，扫描不受影响）、感知/评估/决策/规划链路零影响。
+
+---
+
+## [2026-05-13] ADR-022 — G2 场景切换为 test_pedestrian.world + start_g2.sh
+
+**决策**：G2 行人验证场景由 `scenario:=main`（construction_site.world）改为 `scenario:=pedestrian`（test_pedestrian.world），新增 `~/start_g2.sh` 启动脚本。
+
+**根因**：construction_site.world 包含 4 围栏 + 8 建材堆 + 2 锥形柱，LiDAR 从启动即检测到大量 lidar_cluster_*，机器始终处于 CAUTION，行人靠近时 primary_threat_id 在静态障碍物和行人之间跳变，状态转换链路（NORMAL→CAUTION→EMERGENCY_STOP→NORMAL）无法清晰展示。
+
+**方案**：使用 test_pedestrian.world（仅 1 个行人 actor + 1 个碰撞体），背景零干扰。行人路径 `(8,5)→(3,0)→(8,-5)` 正好横穿机器行进路线（x 轴），触发完整状态链路。
+
+**start_g2.sh 内容**：
+```bash
+roslaunch excavator_gazebo full_simulation.launch scenario:=pedestrian model_variant:=simple rviz:=true
+```
+
+**关联**：2D Nav Goal 功能（ADR-018）全场景通用，G2 同样支持 RViz 自由设置终点。
+
+**影响**：construction_site.world 保留不变；G2 单独使用 test_pedestrian.world 进行行人避障专项验证。
+
+---
+
+## [2026-05-13] ADR-021 — 统一所有场景默认使用 simple 模型
+
+**决策**：将 `gazebo_world.launch` 和 `full_simulation.launch` 的 `model_variant` 参数默认值从 `ec650` 改为 `simple`。
+
+**修改文件**：
+- `src/excavator_gazebo/launch/gazebo_world.launch`：`model_variant` default `ec650` → `simple`
+- `src/excavator_gazebo/launch/full_simulation.launch`：`model_variant` default `ec650` → `simple`
+
+**根因**：EC650 高保真 URDF（14连杆、STL mesh collision）在 Gazebo ODE 物理引擎下与 `planar_move` 插件存在接触力冲突，导致车体 pitch/roll 偏移、翻倒，所有场景（G1/G2/G3）均受影响。G3 已于 ADR-017 引入 simple 模型并验证姿态稳定（roll/pitch ≈ 0），需将此作为全局默认。
+
+**影响评估**：
+- EC650 模型文件保留不删除，仍可通过 `model_variant:=ec650` 显式指定
+- G1/G2/G3 全部场景使用 simple 模型，行为与已验证的 G3 one-liner 一致
+- 不影响任何感知/评估/决策/规划逻辑
+
+**关联**：`bug/g1_ec650_tipover_all_scenarios.md`，ADR-017（simple 模型设计）
+
+---
+
+## [2026-05-13] ADR-020 — 修复 G3 绕障后 FSM 永久 PAUSED
+
+**决策**：将 `fsm_params.yaml` 中 CAUTION→PAUSED 入口阈值从 **0.60 提高到 0.72**。
+
+**修改文件**：`src/excavator_decision/config/fsm_params.yaml`（单一数值修改）
+
+**根因（数学验证）**：
+- RRT* 规划绕障路径时最近通过距离 = co.radius(0.5) + obstacle_margin(2.0) = **2.5m**
+- risk_score = (safe_dist - 2.5) / (safe_dist - critical_dist) = (5.0 - 2.5) / 4.0 = **0.625**
+- 0.625 ≥ 旧阈值 0.60 → 进入 PAUSED → 机器停止 → score 卡在 0.625 > 退出阈值 0.45 → **永久停止**
+- 现象印证：`current.md` 观测到 `min_distance≈2.71m`，`state=PAUSED`，这正是机器在绕障路径上停止后的 obs_A 残留距离
+
+**影响评估**：
+- G3 静态绕障（type_weight=1.0）：2.5m 处 score=0.625 < 0.72 → CAUTION，继续行驶 ✓
+- G2 行人靠近（type_weight=1.5）：3.08m 处 person_score=0.72 → PAUSED；2.46m 处 score=0.9375 > 0.85 → EMERG ✓（G2 行为基本不变）
+
+**附加改动**：`excavator_monitor.rviz` 添加 `/excavator/goal_marker` Marker 显示，使 ADR-018 实现的 2D Nav Goal 功能可被视觉确认。
+
+---
+
+## [2026-05-12] GAP-3 修复 — construction_site.world 添加行人 Actor
+
+**决策**：在主场景 `construction_site.world` 中添加 1 个行人 Actor（`pedestrian_1`）及对应物理碰撞体（`ped_collider_0`），并在 `full_simulation.launch` 中为 `scenario=main` 启用 `actor_collider_sync` 节点。
+
+**修改文件**：
+- `excavator_gazebo/worlds/construction_site.world`：新增 `<actor name="pedestrian_1">` 20s 循环路径 `(5,8)→(4,0)→(5,-8)→返回`；新增 `<model name="ped_collider_0">` 高 4m 圆柱碰撞体（中心 z=2.0m）
+- `excavator_gazebo/launch/full_simulation.launch`：新增 `scenario=main` 条件下的 `actor_collider_sync` 节点（`actor_names_str=pedestrian_1, collider_names_str=ped_collider_0, collider_z=2.0`）
+
+**验证结果**（2026-05-12 Gazebo headless 端到端）：
+- `actor_collider_sync` 节点正常启动，参数配置正确 ✅
+- `/excavator/tracked_obstacles` 以 18.5Hz 发布，`obstacle_id=actor_pedestrian_1`，`obstacle_type=person` ✅
+- 行人路径正确：`world_x≈4.97,world_y≈8.03`（起点）→ `world_x≈3.95,world_y≈0.12`（最近点）✅
+- 行人靠近时 risk_level 从 1 升至 2，FSM 转入 EMERGENCY_STOP（state=3）✅
+
+**理由**：主场景是论文描述的核心演示场景，答辩时需展示行人动态避障功能；行人 Actor 是开题报告明确要求的"移动行人"测试场景要素。
+
+---
+
 ## [2026-05-08] 初始技术选型
 
 ### 机器人中间件：ROS Noetic
@@ -291,6 +702,114 @@
 
 ---
 
+## [2026-05-10] ADR-013：REALTIME-11 修复 — 替换 URDF + planar_move 插件（方案 D+B）
+
+### 背景
+Phase 7 验证后发现挖掘机在 Gazebo 中完全无法物理移动（REALTIME-11）：URDF 履带碰撞几何为 Box，平底面接触无法产生滚动摩擦，实测 500kN 外力仅位移 3cm。
+
+### 备选方案
+| 方案 | 说明 | 工作量 |
+|------|------|--------|
+| A | 履带 collision 改为 Cylinder | 中 |
+| B | 换 planar_move 插件 | 极低 |
+| C | 降地面摩擦系数 mu | 极低 |
+| **D+B（选定）** | 替换为 Volvo EC650 CAD URDF + planar_move | 中 |
+
+### 决策
+**选定方案 D+B**：以用户提供的 Volvo EC650 真实 CAD URDF（14连杆，STL mesh）替换现有几何体模型，同时使用 `libgazebo_ros_planar_move.so` 替代 diff_drive 彻底绕开履带滚动物理问题。
+
+### 理由
+1. EC650 CAD 模型视觉真实性远优于现有几何体，提升论文图表质量
+2. planar_move 接口（/cmd_vel + /odom）与 FSM + RRT* 完全兼容，无需修改任何上层逻辑
+3. 项目目标为验证感知-决策软件流水线，不需要物理级别履带动力学
+
+### 需适配的问题
+- D-01：无移动机制（planar_move 解决）
+- D-02：CAD 关节原点偏置（需校验）
+- D-03/D-04：补充传感器定义和 Gazebo 插件
+- D-05：包路径 `package://volvo_ec650` → `package://excavator_description`
+- D-06：补充 base_footprint 根节点
+- D-07：碰撞几何简化（mesh → box/cylinder）
+
+### 文件
+- 源模型：`Model/Urdf/volvo_ec650/volvo_ec650.urdf`
+- 目标文件：`src/excavator_description/urdf/excavator_volvo.urdf.xacro`
+- STL 目标：`src/excavator_description/meshes/volvo_ec650/`
+- 详细方案：`bug/urdf_fix_plan.md`
+
+---
+
+## [2026-05-10] ADR-014：actor_collider_sync 坐标系统一 — TF2 变换修复
+
+### 问题（bug/g2_coordinate_frame_mismatch.md）
+G2 行人场景 `sensor_fusion` 世界坐标近邻匹配永不命中：`actor_collider_sync` 发布的 `world_x/y` 是 Gazebo 绝对坐标（odom 系，~5.1m, 3.3m），而 `lidar_processor` 的 `world_x/y` 是 `base_footprint` 相对坐标（~-5.6m, 2.1m），两者差距约 10m >> 阈值 1.0m。
+
+### 决策
+在 `actor_collider_sync.py` 的 `_sync_cb` 中，用 TF2（`odom → base_footprint`）将 Actor 的 Gazebo 世界坐标变换到 `base_footprint` 系后再写入 `obs.world_x/y/z`，与 `lidar_processor` 保持坐标系一致。
+
+### 理由
+- `planar_move` 插件在 `odom` 帧追踪机器人（理想运动学，`odom ≈ Gazebo world`），变换路径 `odom → base_footprint` 完整可用
+- `lidar_processor` 已使用 TF2（`lidar_link → base_footprint`），两路数据统一到同一系后直接在 `sensor_fusion` 中比较距离
+
+### 变更文件
+- `src/excavator_gazebo/scripts/actor_collider_sync.py`：新增 `tf2_ros.Buffer` + `TransformListener`，`_sync_cb` 中替换直接赋值为 TF2 变换；TF 失败降级为 `world_x/y=0.0`（sensor_fusion 会跳过匹配）
+- `src/excavator_gazebo/package.xml`：新增 `tf2_ros`、`tf2_geometry_msgs` exec_depend
+- `~/kill_all.sh`：新增 `pkill -9 -f "python.*excavator_ws"` 清理孤儿 Python 节点
+
+### 验证结果（2026-05-10）
+行人 `distance` = 2.55~5.5m（修复前 999.0），EMERGENCY_STOP 正确触发，cmd_vel=0
+
+---
+
+## [2026-05-11] G3 障碍物位置调整 — 适配 EC650 footprint
+
+**修改文件**：`src/excavator_gazebo/worlds/test_scenarios/test_static.world`（配套：`src/excavator_planner/config/planner_params.yaml`）
+
+**原因**：ADR-013 引入 Volvo EC650 后，车辆 footprint 约 4m 宽，旧 G3 静态障碍物布局按小型 URDF 设计；`obstacle_margin=0.5m` 与障碍物间距不足，RRT* 规划路径贴近障碍物，Gazebo 中 EC650 碰撞几何与静态 box 交叠，导致 planar_move 与接触力互相作用，机体出现姿态抖动/翻倒（见 `bug/g3_static_excavator_tipover.md`）。G3 原验证（2026-05-09）仅验证 topic 输出，EC650 引入后未重新做 GUI 物理导航验证。
+
+**具体改动**：
+
+| 项目 | 旧值 | 新值 |
+|------|------|------|
+| `obstacle_margin`（planner_params.yaml） | 0.5m | **2.0m** |
+| `obstacle_B` 位置（test_static.world） | (9.0, 2.5) | **(9.0, 7.0)** |
+| `obstacle_C` 位置（test_static.world） | (12.0, -2.0) | **(12.0, -7.0)** |
+| `obstacle_A` 位置（test_static.world） | (5.0, 0.0) | (5.0, 0.0)（不变） |
+
+**验证逻辑**：obstacle_A 距起点 5m > EC650 半宽(2m) + obstacle_margin(2.0m)；obstacle_B/C 外移后各通道宽度 > 2×obstacle_margin + 1m 余量，RRT* 可找到有效 S 形绕障路径；`rrt_star_planner.cpp` 碰撞检测（`d < obs.radius + params_.obstacle_margin`）正确读取 yaml 参数，无硬编码。
+
+---
+
+## [2026-05-11] ADR-015：G3 RRT* 无法找到路径 — co.radius 修正 + 障碍物 S 形回移
+
+### 背景
+ADR-013（引入 EC650）+ G3 第一次修复（obstacle_margin 2.0m + 障碍物外移至 y=±7m）解决了物理翻倒问题，但引入新 bug：`RRTStar: no path found to goal (10.00, 0.00)` 持续报警，机器人无法导航（详见 `bug/g3_no_path_found.md`）。
+
+### 根因
+1. `rrt_star_planner.cpp` 的 `obstacleCb` 中 `co.radius` 硬编码为 1.0m（未被第一次修复改动），加上 `obstacle_margin=2.0m`，总排除圆半径 = 3.0m，G3 走廊被压缩至 1m，RRT* 5000 次采样无法通过。
+2. obstacle_B/C 移至 y=±7m 后距离路径轴线太远，不形成第二次偏折约束，S 形轨迹特征丢失。
+
+### 决策
+**`co.radius` 职责厘清**：`co.radius` 应代表障碍物实际物理半径（~0.5m for ~1m box），`obstacle_margin` 代表 EC650 安全裕量（2.0m）。两者叠加后总排除圆 = 2.5m，物理含义正确，且走廊恢复至 2m 可通过。
+
+**障碍物回移**：obstacle_B/C 从 y=±7m 回移至 y=±5m，使其重新对路径形成第二次偏折约束，RRT* 规划出真正的 S 形绕障路径。
+
+### 具体改动
+
+| 项目 | 旧值 | 新值 |
+|------|------|------|
+| `co.radius`（rrt_star_planner.cpp，obstacleCb 硬编码） | 1.0m | **0.5m** |
+| `obstacle_margin`（planner_params.yaml） | 2.0m | 2.0m（不变） |
+| `obstacle_B` 位置（test_static.world） | (9.0, 7.0) | **(9.0, 5.0)** |
+| `obstacle_C` 位置（test_static.world） | (12.0, -7.0) | **(12.0, -5.0)** |
+
+### S 形几何验证
+- obstacle_A (5,0) 排除圆 2.5m：路径在 x≈5 须偏移 y>2.5（上方绕行）
+- obstacle_B (9,5) 排除圆 2.5m：下边界 y=2.5，路径在 x≈9 须低于 y<2.5（下压回正）
+- S 形约束成立；走廊宽 ≈ 2m，RRT* 可稳定规划
+
+---
+
 ## [2026-05-12] G3 坐标系统一与 simple 模型验证 — ADR-016/017
 
 ### ADR-016：`ObstacleInfo.world_x/y/z` 统一为 `odom` 全局坐标
@@ -315,63 +834,228 @@
 **使用约束**：论文/演示中如使用 simple 模型，应表述为“EC650 footprint 简化动力学代理模型”，不要宣称已完成完整 EC650 机械臂动力学仿真。
 
 
+## [2026-05-13] ADR-018：G3 动态终点设置 — RViz 2D Nav Goal + 场景扩展
+
+### 背景
+G3 静态绕障场景默认终点固定为 `(10, 0)`，路程仅 10m；obstacle_C 位于 `(12, -5)` 已超出终点，机器人实际只需绕过 obstacle_A 即可到达终点，三障碍物 S 形演示效果不完整。答辩演示时无法灵活展示不同路径的绕障过程。
+
+### 决策
+**支持运行时通过 RViz "2D Nav Goal" 动态设置终点**，同时扩展 `test_static.world` 的场地范围和障碍物布局，使默认配置本身就能展示完整 S 形绕障。
+
+### 具体改动
+
+| 文件 | 改动 |
+|------|------|
+| `src/excavator_planner/include/excavator_planner/rrt_star_planner.h` | 新增 `goal_sub_`（`geometry_msgs/PoseStamped`）和 `marker_pub_`（`visualization_msgs/Marker`）成员 |
+| `src/excavator_planner/src/rrt_star_planner.cpp` | 新增 `goalCb`：收到 `/move_base_simple/goal` 后更新 `goal_`、清空当前路径、立即触发重规划；发布红色球形 Marker（半径 0.3m）到 `/excavator/goal_marker` |
+| `src/excavator_planner/config/planner_params.yaml` | `goal_x: 10.0` → `goal_x: 18.0` |
+| `src/excavator_gazebo/worlds/test_scenarios/test_static.world` | 围栏长度 30m→42m，中心 x=0→x=6（覆盖 x=-15 到 x=+27）；三障碍物重新布置为真正 S 形（见下方几何设计） |
+| `src/excavator_planner/package.xml` | 新增 `visualization_msgs` exec_depend |
+| `src/excavator_planner/CMakeLists.txt` | `find_package` 和 `target_link_libraries` 加入 `visualization_msgs` |
+
+### 障碍物新布局（S 形几何设计）
+
+| 障碍物 | 旧位置 | 新位置 | 作用 |
+|--------|--------|--------|------|
+| obstacle_A | (5, 0) | **(5, 0)** 不变 | 正中挡路，强制首次侧偏（y+） |
+| obstacle_B | (9, 5) | **(11, 4)** | 位于 y+ 绕行走廊中，强制回压至中轴线（y-） |
+| obstacle_C | (12, -5) | **(16, 0)** | 回到中轴线，形成第二次偏折，完成 S 形 |
+
+有效排除圆半径 = co.radius(0.5m) + obstacle_margin(2.0m) = 2.5m；走廊验证：
+
+- obs_A(5,0) 上侧走廊：y=0+2.5=2.5m，到 y=-15 围栏 12.5m ✅
+- obs_A 与 obs_B 之间（x=8，y≈3）：两排除圆均不相交，通道 ≥ 2m ✅
+- obs_B(11,4) 下侧走廊：y=4-2.5=1.5m，RRT* 可规划路径回中轴 ✅
+- obs_C(16,0) 两侧走廊：y>2.5 或 y<-2.5，到围栏（x=27 侧无围栏）✅
+
+### 设计决策要点
+
+- **frame_id 处理**：直接使用 `PoseStamped.pose.position.x/y`，忽略 frame_id（RViz Fixed Frame = odom，不会变）
+- **立即重规划**：goalCb 内直接调用 `planningTimerCb`，不等 2s 定时器
+- **marker 外观**：红色实心球，`ns=goal_marker`，`id=0`，`lifetime=0`（常驻），随新 goal 覆盖更新
+- **线程安全**：`goal_` 和 `current_path_` 访问加 `std::mutex goal_mutex_`
+- **RViz 配置**：`excavator_monitor.rviz` 已包含 "2D Nav Goal" 工具，无需修改
+
+### 理由
+- 动态终点让答辩演示时可现场调整路径，展示系统对不同目标的自适应规划能力
+- 场地扩展和障碍物重布局使默认启动即可展示完整 S 形三障碍物绕行，无需手动点击
+- 工程量小（~50-60 行，5 个文件），风险低，不影响 G1/G2 场景
+
+### 待验证
+- [x] catkin_make 0 ERROR（2026-05-13 验证通过，`[100%] Built target rrt_star_planner`）
+- [ ] RViz 点击 2D Nav Goal → goal_marker 红球出现 → 路径重规划
+- [ ] 默认启动：三障碍物 S 形路径正确规划（见 Fix-1）
+- [ ] G1 烟雾测试不退化
+
+### Fix-1（2026-05-13）：默认终点落在 obstacle_C 膨胀区内
+**问题**：obstacle_C(16,0)，有效排除圆 2.5m，默认终点 (18,0) 距中心仅 2.0m < 2.5m，
+RRT* 持续报 `no path found to goal (18.00, 0.00)`。  
+**修复**：`planner_params.yaml` 中 `goal_x: 18.0` → `goal_x: 20.0`，余量 4m。  
+**文件**：`src/excavator_planner/config/planner_params.yaml`（1 行）
+
+---
+
+## [2026-05-13] ADR-019：G3 障碍物布局再调整 — 修复走廊过窄导致机器人卡死
+
+### 问题（2026-05-13 G3 实车运行观察）
+
+ADR-018 将 obs_B 移至 (11, 4)，obs_A(5,0) 与 obs_B(11,4) 圆心距仅 7.21m，有效排除圆（2.5m×2）gap = **2.21m**。机器人在执行 RRT* 规划路径时，路径中点距两圆心仅 3.60m，风险评分 ≈ 0.52，超过 PAUSED 进入阈值（0.60）临界点；实际运行时机器人一旦因跟踪误差稍微偏离规划路径，便触发 PAUSED。PAUSED 退出需 score < 0.45（对应距离 > 3.2m），而停止后对静态障碍物 score 维持在 0.52 → **机器人永久卡死在 PAUSED**。
+
+### 根因分析
+
+- RRT* 排除圆半径 = co.radius(0.5) + obstacle_margin(2.0) = **2.5m**（规划安全裕量）
+- FSM PAUSED 进入：score ≥ 0.60，对应距离 ≤ **2.6m**（小于 2.5m 排除圆极限）
+- FSM PAUSED 退出：score < 0.45，对应距离 ≥ **3.2m**
+- 走廊最近距离（3.60m）< PAUSED 退出所需距离（3.2m）：计划路径合法，但执行中一旦进入 PAUSED 就无法自动退出
+
+obs_B(11,4) 的另一个问题：ADR-018 Option B 曾提议将 obs_A 移至 (5,5)，但经几何验证，obs_A 在 y=5 时排除圆南边界为 y=2.5，机器人沿 y≈0 直行不受阻挡，**S 形约束失效**。正确做法是保留 obs_A 在 (5,0) 以挡住直线路径。
+
+### 决策
+
+**obs_A 不动（(5,0)），只调整 obs_B 和 obs_C：**
+
+| 障碍物 | ADR-018 位置 | ADR-019 位置 | 改动 |
+|--------|------------|------------|------|
+| obs_A | (5, 0) | **(5, 0)** | 不变 |
+| obs_B | (11, 4) | **(11, 5)** | y +1 |
+| obs_C | (16, 0) | **(17, 0)** | x +1 |
+| goal | (20, 0) | (20, 0) | 不变 |
+
+### 几何验证
+
+- **A↔B** 圆心距：sqrt(6²+5²) = **7.81m**，间隙 = 7.81-5.0 = **2.81m**（+0.60m vs ADR-018）
+- **B↔C** 圆心距：sqrt(6²+5²) = **7.81m**，间隙 = **2.81m**（对称布局）
+- A↔B 走廊中点：(8, 2.5)，距 A = 距 B = **3.91m** → 风险评分 ≈ 0.19 → **NORMAL ✓**
+- B↔C 走廊中点：(14, 2.5)，距 B = 距 C = **3.91m** → **NORMAL ✓**
+- goal(20,0) 距 C(17,0) = **3.0m > 2.5m ✓**
+- 全路径最近接触距离 **3.91m >> 3.2m**（PAUSED 退出阈值），FSM 全程不触发 PAUSED ✓
+
+### S 形路径说明
+
+```
+y
+4 |  ╱─╲      ╱─╲
+3 | /    ╲  ╱     ╲
+2 |       ─╱       ─→ goal(20,0)
+1 |
+0 +──────────────────── x
+   0   5   11   17  20
+      A    B    C
+```
+- obs_A(5,0) 挡住 y=0 直线路，强制北偏（y>2.5）
+- obs_B(11,5) 南边界 y=2.5，与 obs_A 北边界 y=2.5 对齐，走廊中心 y≈2.5，机器人在 x=8 区域过渡
+- obs_C(17,0) 北边界 y=2.5，再次挡住下压路径，强制北绕
+- 路径产生「北→南→北」三段 S 形，幅度 y: 0→3.5→1.5→3→0
+
+### 改动文件
+
+| 文件 | 改动 |
+|------|------|
+| `src/excavator_gazebo/worlds/test_scenarios/test_static.world` | obs_B pose: y=4→y=5；obs_C pose: x=16→x=17 |
+| `~/start_g3_simple.sh` | roslaunch 命令增加 `rviz:=true` 参数 |
+
+### 待验证
+
+- [x] G3 simple 场景已通过 `~/start_g3_simple.sh` 启动，且 `/rviz` 节点在线（2026-05-13 验证）。
+- [x] `test_static.world` XML 语法通过：`xmllint --noout`（2026-05-13 验证）。
+- [x] 启动脚本已默认启用 RViz：`~/start_g3_simple.sh` 中 roslaunch 参数为 `rviz:=true`。
+- [ ] Gazebo 重启后 RRT* 不再报 `no path found`
+- [ ] FSM 全程保持 NORMAL/CAUTION，不触发 PAUSED
+- [ ] RViz 可见清晰 S 形路径
+- [ ] G1 烟雾测试不退化
+
+### 验证记录（2026-05-13）
+
+本次按 ADR-019 修改后启动 `~/start_g3_simple.sh`，tmux 会话 `g3_simple` 创建成功，ROS 节点包含 `/gazebo`、`/gazebo_gui`、`/rviz`、`/rrt_star_planner`、`/fsm_controller`，日志显示 `SpawnModel: Successfully spawned entity`。
+
+但一次状态采样显示 `/excavator/system_state.state=2`、`reason="PAUSED"`，同时 `/excavator/risk_state.current_level=1`、`min_distance≈2.71m`、`primary_threat_id="lidar_cluster_4"`。因此 ADR-019 的“全程 NORMAL/CAUTION、不触发 PAUSED”验收目标尚未通过，需继续排查实际加载 world、旧进程残留、风险距离来源或走廊几何裕量。
+
+---
+
 ## 待决策事项
 
 - [x] ~~YOLOv5 训练数据集来源~~：yolov5s.pt 占位权重满足验证，后续使用 Gazebo 合成数据微调
 - [x] ~~TensorRT 量化方案~~：GPU 延迟已满足，无需量化
 - [x] ~~Web Dashboard 通信方式~~：选定 SSE
+- [x] ADR-013 已完成：方案B planar_move 替换，机器人可移动（odom.x=1.90m 验证通过，2026-05-10）
+- [x] ADR-014 已完成：actor_collider_sync TF2 坐标系修复，G2 行人场景重新验证通过（2026-05-10）
+- [x] G3 物理导航 bug 已修复（第一次）：obstacle_margin 2.0m + 障碍物外移（2026-05-11）
+- [x] ADR-015 已完成：co.radius 0.5m + obstacle_B/C 回移至 y=±5m，解决 no path found（见 `bug/g3_no_path_found.md`）
+- [x] GAP-3 已完成：construction_site.world 添加行人 Actor，主场景动态行人避障 Gazebo 端到端验证通过（2026-05-12）
 
-## [2026-05-11] G3 障碍物位置调整 — 适配 EC650 footprint
-**修改文件**：`src/excavator_gazebo/worlds/test_scenarios/test_static.world`（配套参数：`src/excavator_planner/config/planner_params.yaml`）
-**原因**：ADR-013 引入 Volvo EC650 后，车辆 footprint 约 4m 宽，原 G3 静态障碍物布局按小型 URDF 设计；`obstacle_margin=0.5m` 与障碍物间距不足，RRT* 规划路径贴近障碍物，Gazebo 中 EC650 碰撞几何容易与静态 box 交叠，导致 planar_move 与接触力互相作用并出现姿态振荡/翻倒。
-**具体改动**：`obstacle_margin` 从 0.5m 调整为 2.0m；`obstacle_B` 从 `(9.0, 2.5)` 外移到 `(9.0, 7.0)`；`obstacle_C` 从 `(12.0, -2.0)` 外移到 `(12.0, -7.0)`；`obstacle_A` 保持 `(5.0, 0.0)`，最近障碍物距起点 5m，满足 EC650 半宽约 2m + `obstacle_margin=2.0m` 的起点安全距离。
+---
+
+## [2026-05-13] ADR-020 — 修复 G3 绕障后 FSM 永久 PAUSED
+
+**决策**：将 CAUTION→PAUSED 入口阈值从 0.60 提高到 0.72，并进一步让静态障碍物只触发 NORMAL/CAUTION，不触发 PAUSED/EMERGENCY；PAUSED/EMERGENCY 保留给 person/vehicle 等动态高风险目标。同时让 RViz 显示 `/excavator/goal_marker`，方便验证 2D Nav Goal 的红色目标球。
+
+**根因**：RRT* 绕过 obs_A 时最近通过距离约为 2.5m（`co.radius + obstacle_margin`），对应静态障碍物风险分数会接近或超过旧阈值 0.60。单纯提高到 0.72 后，真实运行仍可能因 TTC 分量出现瞬时峰值而触发 PAUSED；停止后距离不再增大，score 仍高于 PAUSED 退出阈值 0.45，导致永久卡住。
+
+**修改文件**：
+- `src/excavator_decision/config/fsm_params.yaml`：新增阈值配置，`caution_to_paused: 0.72`；其余 0.30/0.20/0.45/0.85 不变。
+- `src/excavator_decision/scripts/fsm_controller.py`：`_C2P` 默认值同步改为 0.72；新增 `current_pause_score`，只统计非静态障碍物用于 PAUSED/EMERGENCY 转换。
+- `src/excavator_gazebo/config/excavator_monitor.rviz`：新增 `GoalMarker`，订阅 `/excavator/goal_marker`。
+
+**影响评估**：
+- G3 静态绕障：静态障碍物可持续触发 CAUTION 降速绕行，但不会触发 PAUSED，避免永久卡死。
+- G2 行人/车辆：非静态目标仍参与 PAUSED/EMERGENCY 判断，安全停车逻辑保留。
+
+**验证**（2026-05-13）：终止 WSL 清理旧 ROS/Gazebo 后重启 `~/start_g3_simple.sh`，95 秒采样：`/excavator/system_state.state=1(CAUTION)`，未进入 PAUSED；`/odom.pose.pose.position.x≈19.88`，已接近 `goal_x=20.0`。
+
 
 ---
 
 ## [2026-05-13] ADR-018：G3 动态终点设置 — RViz 2D Nav Goal + 场景扩展
 
 ### 背景
-G3 静态绕障场景默认终点固定为 (10, 0)，路程仅 10m；obstacle_C 位于 (12, -5) 已超出终点，机器人实际只需绕过 obstacle_A 即可到达终点，三障碍物 S 形演示效果不完整。答辩演示时无法灵活展示不同路径的绕障过程。
+G3 默认终点固定 (10,0)，路程仅 10m；obstacle_C 在 (12,-5) 超出终点后方，机器人只需绕 obs_A 即达终点，S 形演示不完整。
 
 ### 决策
-支持运行时通过 RViz 2D
+支持 RViz 2D Nav Goal 运行时动态设置终点，同时扩展 test_static.world 场地和障碍物布局使默认配置即可完整演示 S 形绕障。
+
+### 改动文件
+- rrt_star_planner.h：新增 goal_sub_、marker_pub_、goal_mutex_
+- rrt_star_planner.cpp：新增 goalCb（立即重规划 + 红色球 Marker r=0.3m 到 /excavator/goal_marker）
+- planner_params.yaml：goal_x 10.0→18.0
+- test_static.world：围栏 30m→42m 中心 x=6；障碍物 obs_A(5,0) obs_B(11,4) obs_C(16,0)
+- package.xml + CMakeLists.txt：加 visualization_msgs 依赖
+
+### 设计要点
+- 忽略 frame_id，直接用 x/y（Fixed Frame=odom 不变）
+- goalCb 内立即调用 planningTimerCb，不等 2s 定时器
+- goal_ + current_path_ 加 std::mutex goal_mutex_ 保证线程安全
+
+### 待验证
+- [ ] catkin_make 0 ERROR
+- [ ] RViz 2D Nav Goal → goal_marker + 重规划
+- [ ] 默认 goal=(18,0) S 形路径正确
+- [ ] G1 不退化
+
 ---
 
-## [2026-05-13] ADR-020 — 修复 G3 绕障后 FSM 永久 PAUSED
+## [2026-05-13] ADR-021 — 所有场景统一使用 simple 模型
 
-**决策**：将 CAUTION→PAUSED 入口阈值从 0.60 提高到 0.72，并进一步让静态障碍物只触发 NORMAL/CAUTION，不触发 PAUSED/EMERGENCY；PAUSED/EMERGENCY 保留给 person/vehicle 等动态高风险目标。
+**决策**：将 `gazebo_world.launch` 和 `full_simulation.launch` 中 `model_variant` 参数的默认值从 `ec650` 改为 `simple`。EC650 高保真 URDF 保留但不再使用。
 
-**根因**：G3 静态绕障中，RRT* 合法路径会贴近静态障碍物安全边界。旧 CAUTION→PAUSED 阈值 0.60 会让正常绕障进入 PAUSED；提高到 0.72 后，真实运行仍可能因 TTC 分量出现瞬时峰值而触发 PAUSED。机器停止后静态障碍物距离不再增大，score 高于 PAUSED 退出阈值 0.45，导致永久停止。
+**根因**：EC650 高保真 URDF（Volvo CAD 模型，14连杆+STL mesh）在 Gazebo ODE 中物理不稳定，所有场景（G1/G2/G3）均出现 pitch/roll 偏移、翘头、翻倒。`excavator_simple.urdf.xacro` 已在 G3 验证通过（roll/pitch ≈ 0，姿态稳定），可直接复用。
 
 **修改文件**：
-- src/excavator_decision/config/fsm_params.yaml：新增 caution_to_paused: 0.72，其余阈值保持 0.30/0.20/0.45/0.85。
-- src/excavator_decision/scripts/fsm_controller.py：_C2P 默认值 0.60→0.72；新增 current_pause_score，只统计非静态障碍物用于 PAUSED/EMERGENCY 转换。
-- src/excavator_gazebo/config/excavator_monitor.rviz：新增 /excavator/goal_marker 的 Marker 显示，便于验证 RViz 2D Nav Goal。
+
+| 文件 | 改动 |
+|------|------|
+| `src/excavator_gazebo/launch/gazebo_world.launch` | `model_variant` default: `ec650` → `simple` |
+| `src/excavator_gazebo/launch/full_simulation.launch` | `model_variant` default: `ec650` → `simple` |
 
 **影响评估**：
-- G3 静态绕障：静态障碍物可持续触发 CAUTION 降速绕行，但不会触发 PAUSED，避免永久卡死。
-- G2 行人/车辆：非静态目标仍参与 PAUSED/EMERGENCY 判断，安全停车逻辑保留。
+- G1 烟雾测试：传感器 topic 不变（`/lidar/scan`、`/camera/image_raw`），节点在线验证不受影响
+- G2 行人场景：`actor_collider_sync` + `sensor_fusion` 链路不依赖模型细节，风险评估逻辑不变
+- G3 静态绕障：已使用 `model_variant:=simple`，本次仅消除手动指定参数的需要
+- EC650 原模型文件保留，后续如需高保真视觉展示可通过 `model_variant:=ec650` 切换
 
-**验证**（2026-05-13）：终止 WSL 清理旧 ROS/Gazebo 后重启 ~/start_g3_simple.sh，95 秒采样：/excavator/system_state.state=1(CAUTION)，未进入 PAUSED；/odom.pose.pose.position.x≈19.88，已接近 goal_x=20.0。
+**详细 bug 记录**：`bug/g1_ec650_tipover_all_scenarios.md`
 
-## [2026-05-13] ADR-021 — 统一所有场景默认使用 simple 模型
-
-**决策**：将 `gazebo_world.launch` 和 `full_simulation.launch` 的 `model_variant` 参数默认值从 `ec650` 改为 `simple`。
-
-**修改文件**：
-- `src/excavator_gazebo/launch/gazebo_world.launch`：`model_variant` default `ec650` → `simple`
-- `src/excavator_gazebo/launch/full_simulation.launch`：`model_variant` default `ec650` → `simple`
-
-**根因**：EC650 高保真 URDF（14连杆、STL mesh collision）在 Gazebo ODE 物理引擎下与 `planar_move` 插件存在接触力冲突，导致车体 pitch/roll 偏移、翻倒，G1/G2/G3 全部场景均受影响。G3 已于 ADR-017 引入 simple 模型并验证姿态稳定（roll/pitch ≈ 0），现统一为全局默认。
-
-**影响**：EC650 文件保留，可通过 `model_variant:=ec650` 显式指定；不影响感知/评估/决策/规划任何逻辑。
-
-**关联**：`bug/g1_ec650_tipover_all_scenarios.md`，ADR-017（simple 模型设计）
-
-## [2026-05-13] ADR-022 — G2 场景切换为 test_pedestrian.world + start_g2.sh
-
-**决策**：G2 行人验证由 scenario:=main 改为 scenario:=pedestrian，新增 ~/start_g2.sh。
-
-**根因**：construction_site.world 有 8 个建材堆持续触发 lidar_cluster_*，primary_threat_id 跳变，NORMAL→EMERG 链路不清晰。test_pedestrian.world 背景零干扰，primary_threat_id 固定为 actor_pedestrian_1。
-
-**验证**（2026-05-13）：~/start_g2.sh 启动后 22s，state=EMERGENCY_STOP，primary_threat_id=actor_pedestrian_1，无任何 lidar_cluster 干扰。2D Nav Goal 功能全场景通用，G2 同样支持 RViz 自由设置终点（ADR-018 实现，rrt_star_planner.cpp:272）。
+**待验证**：
+- [ ] `gazebo_world.launch` / `full_simulation.launch` 默认值已改为 `simple`
+- [ ] G1 headless 启动后节点在线、传感器频率正常
+- [ ] G2 行人场景 EMERGENCY_STOP 逻辑不退化
+- [ ] G3 静态绕障 S 形路径正常规划

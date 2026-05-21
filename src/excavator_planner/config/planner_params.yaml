@@ -5,7 +5,12 @@ step_size: 0.5          # RRT extension step length (m)
 max_iterations: 5000    # maximum iteration count
 goal_radius: 0.3        # goal arrival radius (m)
 rewire_radius: 2.0      # rewire search radius (m)
-obstacle_margin: 2.0    # obstacle safety inflation (m), sized for EC650 footprint
+obstacle_margin: 0.3    # 障碍物外侧额外安全裕量 (m)；机器人尺寸由 robot_radius 单独承担
+robot_radius:    3.5    # ADR-031: 6x4m 矩形外接圆半径 sqrt(3^2+2^2)=3.606m，
+                        # 用 3.5m 接近最坏情况，确保任意 yaw 下角部不擦障碍物真实边界。
+                        # 配合 obstacleCb 内 LIDAR_FACE_BIAS=0.5m 修正（cluster 中心校正到 box 真实中心）
+                        # 和硬编码 cluster_radius=0.5，排除圆=0.5+3.5+0.3=4.3m，
+                        # 起点(0,0)距 obs_A(5,0)=5m > 4.3m 可规划，角部到 obs 边界 0.19m 富余
 planning_timeout: 5.0   # planning timeout (s)
 
 # Path follower
@@ -17,7 +22,7 @@ planning_period: 2.0    # re-plan interval (s)
 following_period: 0.1   # velocity command publish interval (s)
 
 # Default goal (used when no goal is set externally)
-goal_x: 20.0            # (m) expanded default goal
+goal_x: 24.0            # (m) ADR-031: G3 终点。距 obs_C(17,0) 7m，预留 cluster 朝东偏移 0.5m 后仍 > 4.8m 排除圆
 goal_y: 0.0             # (m)
 
 # Frame
