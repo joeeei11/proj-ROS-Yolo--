@@ -46,6 +46,8 @@ public:
         // 用于碰撞检测时把机器人当作 R=robot_radius 的圆盘，避免转弯时角部插入障碍
         double robot_radius{3.61};
         double timeout_sec{5.0};
+        double goal_bias{0.20};       // 每轮采样直接偏向目标点的概率（原硬编码 0.10）
+        int    early_exit_iters{300}; // 找到路径后继续优化的最大轮数，之后提前退出
         double x_min{-25.0}, x_max{25.0};
         double y_min{-25.0}, y_max{25.0};
     };

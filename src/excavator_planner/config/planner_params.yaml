@@ -11,11 +11,13 @@ robot_radius:    3.5    # ADR-031: 6x4m 矩形外接圆半径 sqrt(3^2+2^2)=3.60
                         # 配合 obstacleCb 内 LIDAR_FACE_BIAS=0.5m 修正（cluster 中心校正到 box 真实中心）
                         # 和硬编码 cluster_radius=0.5，排除圆=0.5+3.5+0.3=4.3m，
                         # 起点(0,0)距 obs_A(5,0)=5m > 4.3m 可规划，角部到 obs 边界 0.19m 富余
-planning_timeout: 5.0   # planning timeout (s)
+planning_timeout: 2.0   # planning timeout (s)；改 5.0→2.0：不可达目标更快失败，减少用户等待
+goal_bias:        0.20  # 采样偏向目标点的概率（原代码硬编码 0.10，提高收敛速度）
+early_exit_iters: 300   # 找到第一条路径后继续优化的最大轮数，之后提前退出
 
 # Path follower
 nominal_speed: 1.0      # following speed (m/s)
-lookahead_dist: 2.0     # pure-pursuit look-ahead distance (m)
+lookahead_dist: 1.5     # pure-pursuit look-ahead distance (m)；改 2.0→1.5：更紧贴路径，减少切角
 
 # Planning cycle
 planning_period: 2.0    # re-plan interval (s)

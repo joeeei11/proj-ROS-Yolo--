@@ -36,6 +36,7 @@ std::vector<Point2D> RRTStar::plan(const Point2D& start, const Point2D& goal) {
 
     int goal_idx = -1;
     double best_goal_cost = std::numeric_limits<double>::infinity();
+    int iters_after_goal = 0;  // 找到路径后的优化轮数计数
 
     auto deadline = std::chrono::steady_clock::now()
                   + std::chrono::duration<double>(params_.timeout_sec);
@@ -84,6 +85,14 @@ std::vector<Point2D> RRTStar::plan(const Point2D& start, const Point2D& goal) {
         if (d_goal <= params_.goal_radius && best_cost < best_goal_cost) {
             best_goal_cost = best_cost;
             goal_idx = new_idx;
+            iters_after_goal = 0;  // 重置优化计数
+        }
+
+        // 早退出：找到路径后继续优化 early_exit_iters 轮即可，避免跑满 max_iterations
+        if (goal_idx >= 0 && ++iters_after_goal >= params_.early_exit_iters) {
+            ROS_DEBUG("RRTStar: early exit at iter %d (optimized %d iters after first path found)",
+                      iter, params_.early_exit_iters);
+            break;
         }
     }
 
@@ -99,8 +108,7 @@ std::vector<Point2D> RRTStar::plan(const Point2D& start, const Point2D& goal) {
 // ── Core primitives ───────────────────────────────────────────────────────────
 
 Point2D RRTStar::sample(const Point2D& goal) {
-    // 10% goal bias
-    if (uni01_(rng_) < 0.10)
+    if (uni01_(rng_) < params_.goal_bias)
         return goal;
     return {uni_x_(rng_), uni_y_(rng_)};
 }
@@ -254,6 +262,8 @@ RRTStarPlannerNode::RRTStarPlannerNode() : nh_("~") {
     nh_.param("obstacle_margin", params_.obstacle_margin, 0.5);
     nh_.param("robot_radius",    params_.robot_radius,    3.61);
     nh_.param("planning_timeout",params_.timeout_sec,     5.0);
+    nh_.param("goal_bias",        params_.goal_bias,       0.20);
+    nh_.param("early_exit_iters", params_.early_exit_iters, 300);
 
     nh_.param("nominal_speed",   nominal_speed_,   1.0);
     nh_.param("lookahead_dist",  lookahead_dist_,  2.0);
@@ -418,6 +428,18 @@ void RRTStarPlannerNode::goalCb(
     empty_path.header.frame_id = fixed_frame_;
     path_pub_.publish(empty_path);
 
+    // 快速可行性预检：目标点是否落在障碍物排除圆内
+    // 若是，提前 WARN 告知用户换个位置，避免等待 planning_timeout 秒才知道失败
+    for (const auto& co : obstacles_) {
+        double excl = co.radius + params_.robot_radius + params_.obstacle_margin;
+        if (std::hypot(goal_copy.x - co.cx, goal_copy.y - co.cy) < excl) {
+            ROS_WARN("RRTStar: goal (%.2f, %.2f) 落在障碍物排除圆内 "
+                     "(obs at %.2f,%.2f, excl_r=%.1fm)。建议在 RViz 重选目标点。",
+                     goal_copy.x, goal_copy.y, co.cx, co.cy, excl);
+            break;
+        }
+    }
+
     ros::TimerEvent dummy;
     planningTimerCb(dummy);
 }
@@ -465,8 +487,12 @@ void RRTStarPlannerNode::followingTimerCb(const ros::TimerEvent&) {
     while (angle_error < -M_PI) angle_error += 2.0 * M_PI;
 
     geometry_msgs::Twist cmd;
-    cmd.linear.x  = nominal_speed_;
-    cmd.angular.z = std::max(-1.0, std::min(1.0, 2.0 * angle_error));
+    double abs_err    = std::abs(angle_error);
+    // 转弯时按角度误差比例减速（误差 ≥ 1.25rad 时速度降至 40%），减少切角
+    double speed_scale = std::max(0.40, 1.0 - abs_err * 0.8);
+    cmd.linear.x  = nominal_speed_ * speed_scale;
+    // 角速度增益 2.0→1.2，减少震荡；上限放大至 ±1.5 保留急转弯能力
+    cmd.angular.z = std::max(-1.5, std::min(1.5, 1.2 * angle_error));
     cmd_vel_pub_.publish(cmd);
 }
 
